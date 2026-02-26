@@ -1,7 +1,4 @@
-<p align="left">
-  <img src="Elbert/Assets.xcassets/AppImage.imageset/AppImage.png" alt="Elbert Logo" width="48" style="vertical-align: middle;">
-  <strong style="font-size: 2em; vertical-align: middle;">&nbsp;Elbert</strong>
-</p>
+# Elbert
 
 Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open apps, run plugin commands, and stay in flow with a global shortcut.
 

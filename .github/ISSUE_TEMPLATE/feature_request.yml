@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest an idea or enhancement for Elbert
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Help us understand the user value and expected behavior.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short title for the feature
+      placeholder: "Add calculator commands in launcher"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What friction or user need does this address?
+      placeholder: "I often switch to another app for quick calculations."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you expect
+      placeholder: "Typing 12*4 should show 48 and allow copy on Enter."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other options you thought about
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, references, related issues
+    validations:
+      required: false

@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode user data
+*.xcuserstate
+xcuserdata/
+
+# Build outputs
+.build/
+DerivedData/
+build/
+
+# SwiftPM
+.swiftpm/
+.package.resolved
+
+# Logs
+*.log

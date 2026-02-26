@@ -98,7 +98,7 @@ Supported action types:
 - `ActionExecutor`: Executes selected actions (app, URL, shell).
 - `Features/*`: UI for launcher, onboarding, settings, and menu bar.
 
-## Community
+## Open Source
 
 Contributions are welcome. To get started, read:
 
@@ -109,5 +109,4 @@ Contributions are welcome. To get started, read:
 
 ## License
 
-This project is licensed under the `Elbert Non-Commercial License v1.0` (see `LICENSE`).
-This is a source-available license and is not OSI open source.
+This project is licensed under the `MIT License` (see `LICENSE`).

@@ -87,3 +87,20 @@ This roadmap focuses on the next major feature set for Elbert.
 - New contributors can run and submit a PR with minimal friction.
 - Core checks run automatically on pull requests.
 - Public roadmap and contribution path are clear.
+
+## Milestone 6 - Homebrew Distribution
+
+**Goal:** Let users install and update Elbert with a single `brew` command.
+
+### Scope
+
+- Create and publish an official Homebrew Cask (`homebrew-cask` or a dedicated tap).
+- Automate release artifact upload (notarized `.dmg` or `.zip`) via CI.
+- Keep the cask version in sync with GitHub releases automatically.
+- Add install instructions to the README.
+
+### Exit Criteria
+
+- `brew install --cask elbert` works on a clean Mac.
+- New releases automatically update the cask without manual intervention.
+- Installation docs are clear and tested.

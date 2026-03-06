@@ -41,9 +41,64 @@ struct SettingsView: View {
                             .truncationMode(.middle)
                             .fixedSize(horizontal: false, vertical: true)
 
+                        settingsRow("Indexed folders", subtitle: "Choose exactly what Elbert scans") {
+                            Button("Add Folder") {
+                                coordinator.addIndexRootFolder()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+
+                        if coordinator.indexedRootPaths.isEmpty {
+                            Text("No folders selected.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 6) {
+                                ForEach(coordinator.indexedRootPaths, id: \.self) { path in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "folder")
+                                            .font(.system(size: 11, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+
+                                        Text(path)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+
+                                        Spacer(minLength: 8)
+
+                                        Button("Open") {
+                                            coordinator.openIndexedRootFolder(path)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.mini)
+
+                                        Button("Remove") {
+                                            coordinator.removeIndexRootFolder(path)
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.mini)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.55))
+                            )
+
+                            Text("Auto-excludes heavy folders like node_modules, dist, build, target, DerivedData, Pods, .next, .cache, and similar.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         settingsRow(
                             "Search index",
-                            subtitle: coordinator.isRebuildingIndex ? "Rebuilding…" : "Up to date"
+                            subtitle: coordinator.isRebuildingIndex
+                                ? "Rebuilding…"
+                                : (coordinator.isBackgroundRefreshingIndex ? "Refreshing in background…" : "Up to date")
                         ) {
                             Button {
                                 coordinator.reloadPluginsAndIndexFromSettings()
@@ -58,6 +113,29 @@ struct SettingsView: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .disabled(coordinator.isRebuildingIndex)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Result priority")
+                                .font(.subheadline)
+                            Text("Drag to reorder. Top = highest priority.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            List {
+                                ForEach(coordinator.resultPriorityOrder) { source in
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "line.3.horizontal")
+                                            .foregroundStyle(.tertiary)
+                                        Text(source.title)
+                                            .font(.subheadline)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                                .onMove(perform: coordinator.moveResultPriority)
+                            }
+                            .frame(height: 112)
+                            .listStyle(.inset)
                         }
                     }
 

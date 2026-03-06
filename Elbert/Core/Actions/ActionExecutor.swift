@@ -8,6 +8,8 @@ import AppKit
 
 enum ActionExecutionError: Error, LocalizedError {
     case failedToOpenApplication(URL)
+    case failedToOpenFile(URL)
+    case failedToRevealInFinder(URL)
     case failedToOpenURL(URL)
     case shellCommandFailed
 
@@ -15,6 +17,10 @@ enum ActionExecutionError: Error, LocalizedError {
         switch self {
         case .failedToOpenApplication(let url):
             return "Could not open app at \(url.path)."
+        case .failedToOpenFile(let url):
+            return "Could not open file at \(url.path)."
+        case .failedToRevealInFinder(let url):
+            return "Could not reveal file at \(url.path)."
         case .failedToOpenURL(let url):
             return "Could not open URL \(url.absoluteString)."
         case .shellCommandFailed:
@@ -31,6 +37,13 @@ actor ActionExecutor {
             if !ok {
                 throw ActionExecutionError.failedToOpenApplication(url)
             }
+        case .openFile(let url):
+            let ok = NSWorkspace.shared.open(url)
+            if !ok {
+                throw ActionExecutionError.failedToOpenFile(url)
+            }
+        case .revealInFinder(let url):
+            NSWorkspace.shared.activateFileViewerSelecting([url])
         case .openURL(let url):
             let ok = NSWorkspace.shared.open(url)
             if !ok {

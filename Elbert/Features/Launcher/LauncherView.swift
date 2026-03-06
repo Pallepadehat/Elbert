@@ -51,7 +51,7 @@ struct LauncherView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            Text("↑↓  navigate  ·  ↩  run/copy  ·  ⎋  close")
+            Text("↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -66,7 +66,7 @@ struct LauncherView: View {
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            TextField("Search apps, commands, plugins…", text: queryBinding)
+            TextField("Search files, apps, commands…", text: queryBinding)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($isSearchFocused)
@@ -101,7 +101,9 @@ struct LauncherView: View {
                 ResultsList(
                     results: coordinator.state.results,
                     selectedID: coordinator.state.selectedResultID,
-                    onRun: { coordinator.run(result: $0) }
+                    onRun: { coordinator.run(result: $0) },
+                    onRevealInFinder: { coordinator.revealFileInFinder(for: $0) },
+                    onCopyPath: { coordinator.copyPath(for: $0) }
                 )
             }
         }
@@ -152,14 +154,36 @@ struct LauncherView: View {
         return item
     }
 
+    private var selectedResult: SearchResultItem? {
+        guard let selectedID = coordinator.state.selectedResultID else {
+            return coordinator.state.results.first
+        }
+        return coordinator.state.results.first(where: { $0.id == selectedID }) ?? coordinator.state.results.first
+    }
+
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard coordinator.state.isLauncherVisible else { return event }
 
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if modifiers == .command {
+                if Int(event.keyCode) == kVK_ANSI_C {
+                    if let selected = selectedResult, case .openFile = selected.action {
+                        coordinator.copyPath(for: selected)
+                        return nil
+                    }
+                } else if Int(event.keyCode) == kVK_ANSI_R {
+                    if let selected = selectedResult, case .openFile = selected.action {
+                        coordinator.revealFileInFinder(for: selected)
+                        return nil
+                    }
+                }
+            }
+
             // Arrow keys always carry .numericPad and .function flags — strip them
             // before checking whether any significant modifier is held.
-            let significant = event.modifierFlags
+            let significant = modifiers
                 .intersection(.deviceIndependentFlagsMask)
                 .subtracting([.numericPad, .function])
             guard significant.isEmpty else { return event }
@@ -307,6 +331,8 @@ private struct ResultsList: View {
     let results: [SearchResultItem]
     let selectedID: SearchResultItem.ID?
     let onRun: (SearchResultItem) -> Void
+    let onRevealInFinder: (SearchResultItem) -> Void
+    let onCopyPath: (SearchResultItem) -> Void
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -316,7 +342,9 @@ private struct ResultsList: View {
                         ResultRow(
                             item: item,
                             isSelected: selectedID == item.id,
-                            action: { onRun(item) }
+                            action: { onRun(item) },
+                            onRevealInFinder: { onRevealInFinder(item) },
+                            onCopyPath: { onCopyPath(item) }
                         )
                         .id(item.id)
                     }
@@ -342,6 +370,8 @@ private struct ResultRow: View {
     let item: SearchResultItem
     let isSelected: Bool
     let action: () -> Void
+    let onRevealInFinder: () -> Void
+    let onCopyPath: () -> Void
 
     var body: some View {
         Button(action: action) {
@@ -389,6 +419,13 @@ private struct ResultRow: View {
             )
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if case .openFile = item.action {
+                Button("Open File", action: action)
+                Button("Reveal in Finder", action: onRevealInFinder)
+                Button("Copy Path", action: onCopyPath)
+            }
+        }
     }
 }
 
@@ -405,6 +442,14 @@ private struct ResultIconView: View {
                 .interpolation(.high)
                 .antialiased(true)
                 .frame(width: 32, height: 32)
+        case .openFile(let url):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .interpolation(.high)
+                .antialiased(true)
+                .frame(width: 32, height: 32)
+        case .revealInFinder:
+            iconShell(systemName: "folder")
         case .openURL:
             iconShell(systemName: "globe")
         case .runShellCommand:

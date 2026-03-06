@@ -95,6 +95,8 @@ struct HotkeyShortcut: Codable, Hashable {
 
 enum LauncherAction: Hashable, Sendable {
     case openApplication(URL)
+    case openFile(URL)
+    case revealInFinder(URL)
     case openURL(URL)
     case runShellCommand(String)
     case copyToClipboard(String)

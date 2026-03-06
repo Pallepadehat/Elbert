@@ -6,19 +6,80 @@
 import Foundation
 
 actor SearchIndex {
+    struct RankingPreferences: Sendable {
+        let appBoost: Int
+        let pluginBoost: Int
+        let fileBoost: Int
+
+        static let `default` = RankingPreferences(
+            appBoost: 220,
+            pluginBoost: 100,
+            fileBoost: 0
+        )
+    }
+
     private struct IndexedApp: Sendable {
         let name: String
         let url: URL
     }
 
+    private struct IndexedFile: Sendable {
+        let url: URL
+        let path: String
+        let name: String
+        let baseName: String
+        let fileExtension: String
+        let modifiedDate: Date
+        let size: Int64
+        let normalizedName: String
+        let normalizedPath: String
+        let normalizedBaseName: String
+        let normalizedExtension: String
+    }
+
+    private struct FileQuery: Sendable {
+        let text: String
+        let tokens: [String]
+        let extensionFilter: String?
+        let pathFilter: String?
+    }
+
     private var indexedApps: [IndexedApp] = []
     private var indexedPluginCommands: [SearchResultItem] = []
+    private var indexedFilesByPath: [String: IndexedFile] = [:]
+    private var indexedFiles: [IndexedFile] = []
+    private var indexedRoots: Set<String> = []
+    private var rankingPreferences: RankingPreferences = .default
 
-    func rebuildIndex(pluginCommands: [PluginCommand]) async {
+    func updateRankingPreferences(_ preferences: RankingPreferences) {
+        rankingPreferences = preferences
+    }
+
+    func rebuildIndex(pluginCommands: [PluginCommand], fileRoots: [String]) async {
         async let appItems = indexApplications()
         async let pluginItems = indexPluginCommands(pluginCommands)
         indexedApps = await appItems
         indexedPluginCommands = await pluginItems
+        await rebuildFileIndex(rootPaths: fileRoots)
+    }
+
+    func refreshFileIndexIncrementally(rootPaths: [String]) async {
+        let rootURLs = normalizedRootURLs(from: rootPaths)
+        let rootKey = Set(rootURLs.map(\.path))
+
+        if rootKey != indexedRoots {
+            await rebuildFileIndex(rootPaths: rootPaths)
+            return
+        }
+
+        let refreshed = enumerateFiles(at: rootURLs, previous: indexedFilesByPath)
+        indexedFilesByPath = refreshed
+        indexedFiles = refreshed.values.sorted { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.path < rhs.path
+            }
+            return lhs.name < rhs.name
+        }
     }
 
     func search(query: String) async -> [SearchResultItem] {
@@ -26,7 +87,7 @@ actor SearchIndex {
         guard !normalizedQuery.isEmpty else {
             return (appSuggestions() + indexedPluginCommands)
                 .sorted { $0.score > $1.score }
-                .prefix(24)
+                .prefix(40)
                 .map { $0 }
         }
 
@@ -38,6 +99,8 @@ actor SearchIndex {
         }
 
         let queryKey = normalizedQuery.lowercased()
+        let fileQuery = parseFileQuery(queryKey)
+
         let appMatches = indexedApps.compactMap { app -> SearchResultItem? in
             let score = matchScore(query: queryKey, candidate: app.name.lowercased())
             guard score > 0 else { return nil }
@@ -45,7 +108,7 @@ actor SearchIndex {
                 title: app.name,
                 subtitle: app.url.path,
                 source: "App",
-                score: score,
+                score: score + rankingPreferences.appBoost,
                 action: .openApplication(app.url)
             )
         }
@@ -60,20 +123,46 @@ actor SearchIndex {
                 title: item.title,
                 subtitle: item.subtitle,
                 source: item.source,
-                score: score + 100,
+                score: score + rankingPreferences.pluginBoost,
                 action: item.action
             )
         }
 
-        return (appMatches + pluginMatches)
+        let fileMatches = indexedFiles.compactMap { file -> SearchResultItem? in
+            let score = fileMatchScore(query: fileQuery, file: file)
+            guard score > 0 else { return nil }
+            return SearchResultItem(
+                title: file.name,
+                subtitle: file.path,
+                source: "File",
+                score: score + rankingPreferences.fileBoost,
+                action: .openFile(file.url)
+            )
+        }
+
+        return (appMatches + pluginMatches + fileMatches)
             .sorted { lhs, rhs in
                 if lhs.score == rhs.score {
                     return lhs.title < rhs.title
                 }
                 return lhs.score > rhs.score
             }
-            .prefix(40)
+            .prefix(60)
             .map { $0 }
+    }
+
+    private func rebuildFileIndex(rootPaths: [String]) async {
+        let rootURLs = normalizedRootURLs(from: rootPaths)
+        let rebuilt = enumerateFiles(at: rootURLs, previous: [:])
+
+        indexedRoots = Set(rootURLs.map(\.path))
+        indexedFilesByPath = rebuilt
+        indexedFiles = rebuilt.values.sorted { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.path < rhs.path
+            }
+            return lhs.name < rhs.name
+        }
     }
 
     private func indexApplications() -> [IndexedApp] {
@@ -168,6 +257,196 @@ actor SearchIndex {
 
         let hasDigit = trimmed.rangeOfCharacter(from: .decimalDigits) != nil
         return hasDigit
+    }
+
+    private func parseFileQuery(_ query: String) -> FileQuery {
+        let parts = query
+            .split(separator: " ")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var extensionFilter: String?
+        var pathFilter: String?
+        var freeText: [String] = []
+
+        for part in parts {
+            if part.hasPrefix("ext:") {
+                let value = String(part.dropFirst(4)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    extensionFilter = normalize(value)
+                }
+                continue
+            }
+
+            if part.hasPrefix("in:") {
+                let value = String(part.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    pathFilter = normalize(value)
+                }
+                continue
+            }
+
+            freeText.append(part)
+        }
+
+        let joinedText = freeText.joined(separator: " ")
+        let normalizedText = normalize(joinedText)
+        let tokens = normalizedText
+            .split(separator: " ")
+            .map(String.init)
+
+        return FileQuery(
+            text: normalizedText,
+            tokens: tokens,
+            extensionFilter: extensionFilter,
+            pathFilter: pathFilter
+        )
+    }
+
+    private func fileMatchScore(query: FileQuery, file: IndexedFile) -> Int {
+        if let extensionFilter = query.extensionFilter,
+           !file.normalizedExtension.hasPrefix(extensionFilter) {
+            return 0
+        }
+
+        if let pathFilter = query.pathFilter,
+           !file.normalizedPath.contains(pathFilter) {
+            return 0
+        }
+
+        var score = 0
+
+        if !query.text.isEmpty {
+            let nameScore = matchScore(query: query.text, candidate: file.normalizedName)
+            let baseNameScore = matchScore(query: query.text, candidate: file.normalizedBaseName)
+            let pathScore = matchScore(query: query.text, candidate: file.normalizedPath) / 2
+            let extensionScore = matchScore(query: query.text, candidate: file.normalizedExtension)
+            score = max(nameScore + 220, baseNameScore + 180, pathScore, extensionScore + 90)
+        } else if query.extensionFilter != nil || query.pathFilter != nil {
+            score = 360
+        } else {
+            return 0
+        }
+
+        for token in query.tokens {
+            if file.normalizedBaseName.hasPrefix(token) {
+                score += 28
+            } else if file.normalizedName.contains(token) {
+                score += 18
+            } else if file.normalizedPath.contains(token) {
+                score += 10
+            }
+        }
+
+        let recencyBonus = recencyBonus(for: file.modifiedDate)
+        score += recencyBonus
+
+        if file.size <= 0 {
+            score -= 10
+        }
+
+        return score
+    }
+
+    private func recencyBonus(for modifiedDate: Date) -> Int {
+        let age = Date().timeIntervalSince(modifiedDate)
+        if age < 24 * 3600 { return 60 }
+        if age < 7 * 24 * 3600 { return 36 }
+        if age < 30 * 24 * 3600 { return 18 }
+        return 0
+    }
+
+    private func normalizedRootURLs(from rootPaths: [String]) -> [URL] {
+        var seen = Set<String>()
+        var results: [URL] = []
+        let fm = FileManager.default
+
+        for path in rootPaths {
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            let expanded = NSString(string: trimmed).expandingTildeInPath
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: expanded, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+
+            let url = URL(fileURLWithPath: expanded, isDirectory: true).standardizedFileURL
+            let key = url.path
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            results.append(url)
+        }
+
+        return results
+    }
+
+    private func enumerateFiles(
+        at rootURLs: [URL],
+        previous: [String: IndexedFile]
+    ) -> [String: IndexedFile] {
+        guard !rootURLs.isEmpty else { return [:] }
+
+        let fm = FileManager.default
+        var updated: [String: IndexedFile] = [:]
+
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .isDirectoryKey,
+            .nameKey,
+            .pathKey,
+            .contentModificationDateKey,
+            .fileSizeKey
+        ]
+
+        for rootURL in rootURLs {
+            let enumerator = fm.enumerator(
+                at: rootURL,
+                includingPropertiesForKeys: Array(keys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            )
+
+            while let item = enumerator?.nextObject() as? URL {
+                guard let values = try? item.resourceValues(forKeys: keys) else { continue }
+                guard values.isRegularFile == true else { continue }
+
+                let path = item.path
+                let name = values.name ?? item.lastPathComponent
+                let fileExtension = item.pathExtension.lowercased()
+                let baseName = item.deletingPathExtension().lastPathComponent
+                let modifiedDate = values.contentModificationDate ?? .distantPast
+                let size = Int64(values.fileSize ?? 0)
+
+                if let existing = previous[path],
+                   existing.modifiedDate == modifiedDate,
+                   existing.size == size {
+                    updated[path] = existing
+                    continue
+                }
+
+                let normalizedName = normalize(name)
+                let normalizedPath = normalize(path)
+                let normalizedBaseName = normalize(baseName)
+                let normalizedExtension = normalize(fileExtension)
+
+                updated[path] = IndexedFile(
+                    url: item,
+                    path: path,
+                    name: name,
+                    baseName: baseName,
+                    fileExtension: fileExtension,
+                    modifiedDate: modifiedDate,
+                    size: size,
+                    normalizedName: normalizedName,
+                    normalizedPath: normalizedPath,
+                    normalizedBaseName: normalizedBaseName,
+                    normalizedExtension: normalizedExtension
+                )
+            }
+        }
+
+        return updated
     }
 
     private func matchScore(query: String, candidate: String) -> Int {

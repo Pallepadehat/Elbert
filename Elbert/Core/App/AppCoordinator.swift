@@ -9,10 +9,29 @@ import AppKit
 
 @MainActor
 final class AppCoordinator: ObservableObject {
+    enum ResultPrioritySource: String, CaseIterable, Identifiable {
+        case app
+        case plugin
+        case file
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .app: "Apps"
+            case .plugin: "Plugins"
+            case .file: "Files"
+            }
+        }
+    }
+
     @Published private(set) var state = LauncherState()
     @Published private(set) var hotkeyShortcut: HotkeyShortcut
     @Published private(set) var pluginDirectoryPath: String = ""
+    @Published private(set) var indexedRootPaths: [String]
+    @Published private(set) var resultPriorityOrder: [ResultPrioritySource]
     @Published private(set) var isRebuildingIndex = false
+    @Published private(set) var isBackgroundRefreshingIndex = false
 
     private let hotkeyStore: HotkeyStore
     private let hotkeyManager: HotkeyManager
@@ -25,6 +44,12 @@ final class AppCoordinator: ObservableObject {
     private var onboardingWindowController: OnboardingWindowController?
     private var didStart = false
     private var cancellables = Set<AnyCancellable>()
+    private var backgroundRefreshTask: Task<Void, Never>?
+    private var indexedRootBookmarks: [String: Data]
+    private var activeSecurityScopedRoots: [String: URL] = [:]
+    private let indexedRootPathsKey = "search.indexedRootPaths"
+    private let indexedRootBookmarksKey = "search.indexedRootBookmarks"
+    private let resultPriorityOrderKey = "search.priority.order"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -35,6 +60,10 @@ final class AppCoordinator: ObservableObject {
         self.actionExecutor = ActionExecutor()
         self.pluginManager = PluginManager()
         self.hotkeyShortcut = hotkeyStore.shortcut
+        self.indexedRootPaths = AppCoordinator.loadIndexedRootPaths(from: defaults)
+        self.indexedRootBookmarks = AppCoordinator.loadIndexedRootBookmarks(from: defaults)
+        self.resultPriorityOrder = AppCoordinator.loadResultPriorityOrder(from: defaults)
+        self.restoreSecurityScopedRootAccess()
 
         // LauncherState is a nested ObservableObject. SwiftUI only observes
         // the coordinator's objectWillChange, so we forward state changes up.
@@ -134,6 +163,72 @@ final class AppCoordinator: ObservableObject {
         Task { await reloadPluginsAndIndex() }
     }
 
+    func addIndexRootFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose folders to index"
+        panel.prompt = "Add"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK else { return }
+        mergeIndexedRootFolders(panel.urls)
+        Task { await reloadPluginsAndIndex() }
+    }
+
+    func removeIndexRootFolder(_ path: String) {
+        indexedRootPaths.removeAll { $0 == path }
+        indexedRootBookmarks[path] = nil
+        stopAccessingSecurityScopedRoot(path: path)
+        persistIndexedRootPaths()
+        persistIndexedRootBookmarks()
+        Task { await reloadPluginsAndIndex() }
+    }
+
+    func openIndexedRootFolder(_ path: String) {
+        let url = URL(fileURLWithPath: path, isDirectory: true)
+        let opened = NSWorkspace.shared.open(url)
+        if !opened {
+            state.statusMessage = "Could not open folder."
+        }
+    }
+
+    func revealFileInFinder(for result: SearchResultItem) {
+        guard case .openFile(let url) = result.action else { return }
+        Task {
+            do {
+                try await actionExecutor.execute(.revealInFinder(url))
+            } catch {
+                await MainActor.run {
+                    state.statusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func copyPath(for result: SearchResultItem) {
+        guard case .openFile(let url) = result.action else { return }
+        Task {
+            do {
+                try await actionExecutor.execute(.copyToClipboard(url.path))
+                await MainActor.run {
+                    state.statusMessage = "Copied path."
+                }
+            } catch {
+                await MainActor.run {
+                    state.statusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func moveResultPriority(fromOffsets: IndexSet, toOffset: Int) {
+        resultPriorityOrder = reordered(resultPriorityOrder, fromOffsets: fromOffsets, toOffset: toOffset)
+        persistRankingPreferences()
+        Task { await applyRankingPreferencesAndSearch() }
+    }
+
     func openPluginsFolder() {
         let url = pluginManager.pluginDirectoryURL()
         let opened = NSWorkspace.shared.open(url)
@@ -160,11 +255,13 @@ final class AppCoordinator: ObservableObject {
     private func reloadPluginsAndIndex() async {
         isRebuildingIndex = true
         defer { isRebuildingIndex = false }
+        await applyRankingPreferences()
         let plugins = await pluginManager.reloadPlugins()
         let commands = plugins.flatMap(\.commands)
-        await searchIndex.rebuildIndex(pluginCommands: commands)
+        await searchIndex.rebuildIndex(pluginCommands: commands, fileRoots: indexedRootPaths)
         pluginDirectoryPath = pluginManager.pluginDirectoryURL().path
         await search()
+        startBackgroundRefreshLoopIfNeeded()
     }
 
     private func registerCurrentShortcut() {
@@ -184,5 +281,190 @@ final class AppCoordinator: ObservableObject {
                 state.selectedResultID = results.first?.id
             }
         }
+    }
+
+    private func applyRankingPreferencesAndSearch() async {
+        await applyRankingPreferences()
+        await search()
+    }
+
+    private func applyRankingPreferences() async {
+        var boostBySource: [ResultPrioritySource: Int] = [:]
+        for (index, source) in resultPriorityOrder.enumerated() {
+            // Highest row gets the largest boost.
+            boostBySource[source] = (resultPriorityOrder.count - index - 1) * 160
+        }
+
+        await searchIndex.updateRankingPreferences(
+            .init(
+                appBoost: boostBySource[.app] ?? 0,
+                pluginBoost: boostBySource[.plugin] ?? 0,
+                fileBoost: boostBySource[.file] ?? 0
+            )
+        )
+    }
+
+    private func startBackgroundRefreshLoopIfNeeded() {
+        guard backgroundRefreshTask == nil else { return }
+        backgroundRefreshTask = Task { [weak self] in
+            while !(Task.isCancelled) {
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { return }
+                await self.backgroundRefreshIndex()
+            }
+        }
+    }
+
+    private func backgroundRefreshIndex() async {
+        guard !isRebuildingIndex, !indexedRootPaths.isEmpty else { return }
+        isBackgroundRefreshingIndex = true
+        defer { isBackgroundRefreshingIndex = false }
+        await searchIndex.refreshFileIndexIncrementally(rootPaths: indexedRootPaths)
+        await search()
+    }
+
+    private func mergeIndexedRootFolders(_ urls: [URL]) {
+        var seen = Set<String>(indexedRootPaths)
+        for url in urls {
+            let standardized = url.standardizedFileURL
+            let path = standardized.path
+            let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            if let bookmark = createSecurityScopedBookmark(for: standardized) {
+                indexedRootBookmarks[trimmed] = bookmark
+            }
+
+            startAccessingSecurityScopedRoot(url: standardized)
+
+            if seen.insert(trimmed).inserted {
+                indexedRootPaths.append(trimmed)
+            }
+        }
+        indexedRootPaths.sort()
+        persistIndexedRootPaths()
+        persistIndexedRootBookmarks()
+    }
+
+    private func persistIndexedRootPaths() {
+        defaults.set(indexedRootPaths, forKey: indexedRootPathsKey)
+    }
+
+    private func persistIndexedRootBookmarks() {
+        defaults.set(indexedRootBookmarks, forKey: indexedRootBookmarksKey)
+    }
+
+    private func persistRankingPreferences() {
+        defaults.set(resultPriorityOrder.map(\.rawValue), forKey: resultPriorityOrderKey)
+    }
+
+    private static func loadResultPriorityOrder(from defaults: UserDefaults) -> [ResultPrioritySource] {
+        guard let raw = defaults.array(forKey: "search.priority.order") as? [String] else {
+            return [.app, .plugin, .file]
+        }
+
+        let parsed = raw.compactMap(ResultPrioritySource.init(rawValue:))
+        var seen = Set<ResultPrioritySource>()
+        let unique = parsed.filter { seen.insert($0).inserted }
+        let all = Set(ResultPrioritySource.allCases)
+        let existing = Set(unique)
+        let missing = ResultPrioritySource.allCases.filter { !existing.contains($0) }
+        let completed = unique + missing
+        return completed.filter { all.contains($0) }
+    }
+
+    private func reordered(
+        _ items: [ResultPrioritySource],
+        fromOffsets: IndexSet,
+        toOffset: Int
+    ) -> [ResultPrioritySource] {
+        var result = items
+        let moving = fromOffsets.map { result[$0] }
+        for index in fromOffsets.sorted(by: >) {
+            result.remove(at: index)
+        }
+
+        var insertionIndex = toOffset
+        for index in fromOffsets where index < toOffset {
+            insertionIndex -= 1
+        }
+
+        insertionIndex = max(0, min(insertionIndex, result.count))
+        result.insert(contentsOf: moving, at: insertionIndex)
+        return result
+    }
+
+    private static func loadIndexedRootPaths(from defaults: UserDefaults) -> [String] {
+        if let stored = defaults.array(forKey: "search.indexedRootPaths") as? [String], !stored.isEmpty {
+            return stored
+                .map { NSString(string: $0).expandingTildeInPath }
+                .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL.path }
+        }
+
+        let fm = FileManager.default
+        let defaultURL = fm.homeDirectoryForCurrentUser.appendingPathComponent("Documents", isDirectory: true)
+        if fm.fileExists(atPath: defaultURL.path) {
+            return [defaultURL.path]
+        }
+
+        return [fm.homeDirectoryForCurrentUser.path]
+    }
+
+    private static func loadIndexedRootBookmarks(from defaults: UserDefaults) -> [String: Data] {
+        defaults.dictionary(forKey: "search.indexedRootBookmarks") as? [String: Data] ?? [:]
+    }
+
+    private func createSecurityScopedBookmark(for url: URL) -> Data? {
+        do {
+            return try url.bookmarkData(
+                options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func restoreSecurityScopedRootAccess() {
+        for path in indexedRootPaths {
+            guard let bookmark = indexedRootBookmarks[path] else { continue }
+            var stale = false
+
+            guard let resolvedURL = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) else { continue }
+
+            let standardized = resolvedURL.standardizedFileURL
+            startAccessingSecurityScopedRoot(url: standardized)
+
+            if stale, let refreshed = createSecurityScopedBookmark(for: standardized) {
+                indexedRootBookmarks[path] = refreshed
+            }
+        }
+
+        persistIndexedRootBookmarks()
+    }
+
+    private func startAccessingSecurityScopedRoot(url: URL) {
+        let path = url.path
+        guard activeSecurityScopedRoots[path] == nil else { return }
+        guard url.startAccessingSecurityScopedResource() else { return }
+        activeSecurityScopedRoots[path] = url
+    }
+
+    private func stopAccessingSecurityScopedRoot(path: String) {
+        guard let url = activeSecurityScopedRoots.removeValue(forKey: path) else { return }
+        url.stopAccessingSecurityScopedResource()
+    }
+
+    private func stopAccessingAllSecurityScopedRoots() {
+        for (_, url) in activeSecurityScopedRoots {
+            url.stopAccessingSecurityScopedResource()
+        }
+        activeSecurityScopedRoots.removeAll()
     }
 }

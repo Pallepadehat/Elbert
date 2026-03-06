@@ -47,6 +47,11 @@ struct CalculatorEvaluator {
 }
 
 private struct Parser {
+    private struct ParsedValue {
+        var value: Double
+        var isPercent: Bool
+    }
+
     private let tokens: [CalcToken]
     private var index: Int = 0
 
@@ -56,65 +61,97 @@ private struct Parser {
     }
 
     mutating func parse() throws -> Double {
-        let value = try parseExpression()
+        let value = try parseExpression().value
         guard index == tokens.count else {
             throw CalculatorEvaluator.EvaluationError.invalidExpression
         }
         return value
     }
 
-    private mutating func parseExpression() throws -> Double {
-        var value = try parseTerm()
+    private mutating func parseExpression() throws -> ParsedValue {
+        var lhs = try parseTerm()
         while true {
             if match(.plus) {
-                value += try parseTerm()
+                let rhs = try parseTerm()
+                if rhs.isPercent {
+                    lhs.value += lhs.value * rhs.value
+                } else {
+                    lhs.value += rhs.value
+                }
             } else if match(.minus) {
-                value -= try parseTerm()
+                let rhs = try parseTerm()
+                if rhs.isPercent {
+                    lhs.value -= lhs.value * rhs.value
+                } else {
+                    lhs.value -= rhs.value
+                }
             } else {
                 break
             }
         }
-        return value
+        lhs.isPercent = false
+        return lhs
     }
 
-    private mutating func parseTerm() throws -> Double {
+    private mutating func parseTerm() throws -> ParsedValue {
         var value = try parsePower()
+        var sawTermOperator = false
         while true {
             if match(.multiply) {
-                value *= try parsePower()
-            } else if match(.divide) {
+                sawTermOperator = true
                 let rhs = try parsePower()
-                guard rhs != 0 else {
+                value.value *= rhs.value
+            } else if match(.divide) {
+                sawTermOperator = true
+                let rhs = try parsePower()
+                guard rhs.value != 0 else {
                     throw CalculatorEvaluator.EvaluationError.divisionByZero
                 }
-                value /= rhs
+                value.value /= rhs.value
             } else {
                 break
             }
         }
+        if sawTermOperator {
+            value.isPercent = false
+        }
         return value
     }
 
-    private mutating func parsePower() throws -> Double {
+    private mutating func parsePower() throws -> ParsedValue {
         var value = try parseUnary()
         if match(.power) {
             let exponent = try parsePower()
-            value = Foundation.pow(value, exponent)
+            value.value = Foundation.pow(value.value, exponent.value)
+            value.isPercent = false
         }
         return value
     }
 
-    private mutating func parseUnary() throws -> Double {
+    private mutating func parseUnary() throws -> ParsedValue {
         if match(.plus) {
             return try parseUnary()
         }
         if match(.minus) {
-            return -(try parseUnary())
+            var value = try parseUnary()
+            value.value = -value.value
+            return value
         }
-        return try parsePrimary()
+        return try parsePostfix()
     }
 
-    private mutating func parsePrimary() throws -> Double {
+    private mutating func parsePostfix() throws -> ParsedValue {
+        var value = try parsePrimary()
+        var sawPercent = false
+        while match(.percent) {
+            sawPercent = true
+            value.value /= 100
+        }
+        value.isPercent = sawPercent
+        return value
+    }
+
+    private mutating func parsePrimary() throws -> ParsedValue {
         guard index < tokens.count else {
             throw CalculatorEvaluator.EvaluationError.invalidExpression
         }
@@ -122,7 +159,7 @@ private struct Parser {
         switch tokens[index] {
         case .number(let value):
             index += 1
-            return value
+            return ParsedValue(value: value, isPercent: false)
         case .leftParen:
             index += 1
             let value = try parseExpression()
@@ -179,6 +216,7 @@ private struct Lexer {
             case "*": output.append(.multiply)
             case "/": output.append(.divide)
             case "^": output.append(.power)
+            case "%": output.append(.percent)
             case "(": output.append(.leftParen)
             case ")": output.append(.rightParen)
             default:
@@ -224,6 +262,7 @@ private enum CalcToken {
     case multiply
     case divide
     case power
+    case percent
     case leftParen
     case rightParen
 }
@@ -236,6 +275,7 @@ private extension CalcToken {
              (.multiply, .multiply),
              (.divide, .divide),
              (.power, .power),
+             (.percent, .percent),
              (.leftParen, .leftParen),
              (.rightParen, .rightParen):
             return true

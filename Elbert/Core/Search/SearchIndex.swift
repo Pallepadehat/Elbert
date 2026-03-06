@@ -161,7 +161,7 @@ actor SearchIndex {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        let allowedPattern = #"^=?[\d\.\s+\-*/^()]+$"#
+        let allowedPattern = #"^=?[\d\.\s+\-*/^()%]+$"#
         guard trimmed.range(of: allowedPattern, options: .regularExpression) != nil else {
             return false
         }

@@ -25,15 +25,11 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 
 These are planned features for future releases:
 
-1. **Root file indexing (Spotlight-style, faster)**
-   - Index files in configured root folders for instant lookup.
-   - Keep indexing incremental and lightweight for fast updates.
-
-2. **Clipboard history with CloudKit sync**
+1. **Clipboard history with CloudKit sync**
    - Local clipboard timeline.
    - Optional CloudKit sync across your Apple devices.
 
-3. **Currency conversion**
+2. **Currency conversion**
    - Quick currency conversions from natural input.
    - Cached rates with background refresh.
 

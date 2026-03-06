@@ -2,24 +2,7 @@
 
 This roadmap focuses on the next major feature set for Elbert.
 
-## Milestone 1 - Core File Indexing (Spotlight-style, fast)
-
-**Goal:** Search files from configured root folders with near-instant results.
-
-### Scope
-
-- Add configurable root folders in settings.
-- Build a file metadata index (path, name, extension, modified date, size).
-- Add incremental indexing and lightweight background refresh.
-- Add result actions (open file, reveal in Finder, copy path).
-
-### Exit Criteria
-
-- Index startup on a medium project folder completes quickly.
-- Query latency feels instant for normal usage.
-- Rebuild and incremental refresh are stable and predictable.
-
-## Milestone 2 - Clipboard History + CloudKit Sync
+## Milestone 1 - Clipboard History + CloudKit Sync
 
 **Goal:** Make clipboard snippets searchable and optionally synced across devices.
 
@@ -52,7 +35,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Fast evaluation with no UI stutter.
 - Clear handling of invalid expressions.
 
-## Milestone 3 - Currency Conversion
+## Milestone 2 - Currency Conversion
 
 **Goal:** Convert currencies from natural queries with reliable rates.
 
@@ -69,7 +52,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Graceful offline behavior using cached rates.
 - Predictable and testable query parsing.
 
-## Milestone 4 - OSS Readiness and Contributor Experience
+## Milestone 3 - OSS Readiness and Contributor Experience
 
 **Goal:** Make Elbert easy to adopt and contribute to as a public project.
 
@@ -86,7 +69,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Core checks run automatically on pull requests.
 - Public roadmap and contribution path are clear.
 
-## Milestone 5 - Homebrew Distribution
+## Milestone 4 - Homebrew Distribution
 
 **Goal:** Let users install and update Elbert with a single `brew` command.
 

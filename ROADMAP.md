@@ -37,8 +37,6 @@ This roadmap focuses on the next major feature set for Elbert.
 - History is searchable and fast.
 - CloudKit sync can be enabled/disabled safely without data loss.
 
-## Milestone 3 - Calculator
-
 **Goal:** Provide instant calculations directly in the launcher.
 
 ### Scope
@@ -54,7 +52,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Fast evaluation with no UI stutter.
 - Clear handling of invalid expressions.
 
-## Milestone 4 - Currency Conversion
+## Milestone 3 - Currency Conversion
 
 **Goal:** Convert currencies from natural queries with reliable rates.
 
@@ -71,7 +69,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Graceful offline behavior using cached rates.
 - Predictable and testable query parsing.
 
-## Milestone 5 - OSS Readiness and Contributor Experience
+## Milestone 4 - OSS Readiness and Contributor Experience
 
 **Goal:** Make Elbert easy to adopt and contribute to as a public project.
 
@@ -88,7 +86,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Core checks run automatically on pull requests.
 - Public roadmap and contribution path are clear.
 
-## Milestone 6 - Homebrew Distribution
+## Milestone 5 - Homebrew Distribution
 
 **Goal:** Let users install and update Elbert with a single `brew` command.
 

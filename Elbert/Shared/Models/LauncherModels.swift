@@ -97,6 +97,7 @@ enum LauncherAction: Hashable, Sendable {
     case openApplication(URL)
     case openURL(URL)
     case runShellCommand(String)
+    case copyToClipboard(String)
 }
 
 struct SearchResultItem: Identifiable, Hashable, Sendable {

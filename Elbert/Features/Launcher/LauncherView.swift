@@ -29,14 +29,14 @@ struct LauncherView: View {
                 )
         )
         .onAppear {
-            isSearchFocused = true
+            focusSearchField()
             installKeyMonitor()
         }
         .onDisappear {
             removeKeyMonitor()
         }
         .onChange(of: coordinator.state.isLauncherVisible) { _, isVisible in
-            if isVisible { isSearchFocused = true }
+            if isVisible { focusSearchField() }
         }
         .onEscapeKey {
             coordinator.dismissLauncher()
@@ -51,7 +51,7 @@ struct LauncherView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            Text("↑↓  navigate  ·  ↩  run  ·  ⎋  close")
+            Text("↑↓  navigate  ·  ↩  run/copy  ·  ⎋  close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -91,6 +91,12 @@ struct LauncherView: View {
         Group {
             if coordinator.state.results.isEmpty {
                 emptyState
+            } else if let item = calculatorItem {
+                CalculatorResultPane(
+                    expression: coordinator.state.query,
+                    result: item.title,
+                    onRun: { coordinator.run(result: item) }
+                )
             } else {
                 ResultsList(
                     results: coordinator.state.results,
@@ -133,6 +139,17 @@ struct LauncherView: View {
             get: { coordinator.state.query },
             set: { coordinator.updateQuery($0) }
         )
+    }
+
+    private var calculatorItem: SearchResultItem? {
+        guard coordinator.state.results.count == 1,
+              let item = coordinator.state.results.first else {
+            return nil
+        }
+        guard case .copyToClipboard = item.action, item.source == "Calc" else {
+            return nil
+        }
+        return item
     }
 
     private func installKeyMonitor() {
@@ -179,6 +196,108 @@ struct LauncherView: View {
 
         let next = (idx + offset + ids.count) % ids.count
         coordinator.state.selectedResultID = ids[next]
+    }
+
+    private func focusSearchField() {
+        isSearchFocused = true
+        DispatchQueue.main.async {
+            isSearchFocused = true
+        }
+    }
+}
+
+// MARK: - Calculator Result
+
+private struct CalculatorResultPane: View {
+    let expression: String
+    let result: String
+    let onRun: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Calculator")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+            Button(action: onRun) {
+                HStack(spacing: 0) {
+                    calculatorColumn(value: cleanExpression, footer: "Input")
+
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.06))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.88))
+                    }
+                    .frame(width: 64)
+
+                    calculatorColumn(value: result, footer: "Copied on Enter")
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 122)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.accentColor.opacity(0.26),
+                                    Color.accentColor.opacity(0.18)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+
+            Text("Press Enter to copy result and close")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 4)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var cleanExpression: String {
+        let trimmed = expression.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("=") {
+            return String(trimmed.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    @ViewBuilder
+    private func calculatorColumn(value: String, footer: String) -> some View {
+        VStack(spacing: 8) {
+            Text(value)
+                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.4)
+                .lineLimit(1)
+            Text(footer)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.74))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.14))
+                )
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
     }
 }
 
@@ -290,6 +409,8 @@ private struct ResultIconView: View {
             iconShell(systemName: "globe")
         case .runShellCommand:
             iconShell(systemName: "terminal")
+        case .copyToClipboard:
+            iconShell(systemName: "function")
         }
     }
 

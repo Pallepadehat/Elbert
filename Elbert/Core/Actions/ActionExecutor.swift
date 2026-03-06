@@ -38,6 +38,10 @@ actor ActionExecutor {
             }
         case .runShellCommand(let command):
             try await runShell(command)
+        case .copyToClipboard(let value):
+            await MainActor.run {
+                copyToClipboard(value)
+            }
         }
     }
 
@@ -61,5 +65,11 @@ actor ActionExecutor {
                 continuation.resume(throwing: error)
             }
         }
+    }
+
+    nonisolated private func copyToClipboard(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
     }
 }

@@ -33,11 +33,7 @@ These are planned features for future releases:
    - Local clipboard timeline.
    - Optional CloudKit sync across your Apple devices.
 
-3. **Calculator**
-   - Inline expression evaluation from the launcher.
-   - Fast copy of results.
-
-4. **Currency conversion**
+3. **Currency conversion**
    - Quick currency conversions from natural input.
    - Cached rates with background refresh.
 

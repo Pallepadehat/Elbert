@@ -21,13 +21,20 @@ actor SearchIndex {
         indexedPluginCommands = await pluginItems
     }
 
-    func search(query: String) -> [SearchResultItem] {
+    func search(query: String) async -> [SearchResultItem] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else {
             return (appSuggestions() + indexedPluginCommands)
                 .sorted { $0.score > $1.score }
                 .prefix(24)
                 .map { $0 }
+        }
+
+        if isLikelyCalculatorQuery(normalizedQuery) {
+            if let calcResult = await calculatorResult(for: normalizedQuery) {
+                return [calcResult]
+            }
+            return []
         }
 
         let queryKey = normalizedQuery.lowercased()
@@ -133,6 +140,34 @@ actor SearchIndex {
                 action: .openApplication(app.url)
             )
         }
+    }
+
+    private func calculatorResult(for query: String) async -> SearchResultItem? {
+        let result = try? await MainActor.run {
+            try CalculatorEvaluator.formattedResult(for: query)
+        }
+        guard let result else { return nil }
+
+        return SearchResultItem(
+            title: result,
+            subtitle: "Press Enter to copy result and close",
+            source: "Calc",
+            score: 2_000,
+            action: .copyToClipboard(result)
+        )
+    }
+
+    private func isLikelyCalculatorQuery(_ query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        let allowedPattern = #"^=?[\d\.\s+\-*/^()]+$"#
+        guard trimmed.range(of: allowedPattern, options: .regularExpression) != nil else {
+            return false
+        }
+
+        let hasDigit = trimmed.rangeOfCharacter(from: .decimalDigits) != nil
+        return hasDigit
     }
 
     private func matchScore(query: String, candidate: String) -> Int {

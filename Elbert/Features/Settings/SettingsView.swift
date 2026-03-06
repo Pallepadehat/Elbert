@@ -88,6 +88,10 @@ struct SettingsView: View {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(Color(nsColor: .windowBackgroundColor).opacity(0.55))
                             )
+
+                            Text("Auto-excludes heavy folders like node_modules, dist, build, target, DerivedData, Pods, .next, .cache, and similar.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
 
                         settingsRow(

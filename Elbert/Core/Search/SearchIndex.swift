@@ -6,6 +6,44 @@
 import Foundation
 
 actor SearchIndex {
+    private static let ignoredDirectoryNames: Set<String> = [
+        "node_modules",
+        "bower_components",
+        "vendor",
+        "dist",
+        "build",
+        "out",
+        "target",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        ".cache",
+        ".parcel-cache",
+        ".svelte-kit",
+        ".angular",
+        ".gradle",
+        ".mvn",
+        ".terraform",
+        ".serverless",
+        ".aws-sam",
+        ".dart_tool",
+        "deriveddata",
+        "pods",
+        "carthage",
+        ".build",
+        "bin",
+        "obj",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache"
+    ]
+
+    private static let ignoredFileExtensions: Set<String> = [
+        "o", "obj", "class", "pyc", "pyo", "a", "dylib", "so", "dll", "tmp"
+    ]
+
     struct RankingPreferences: Sendable {
         let appBoost: Int
         let pluginBoost: Int
@@ -317,10 +355,10 @@ actor SearchIndex {
         var score = 0
 
         if !query.text.isEmpty {
-            let nameScore = matchScore(query: query.text, candidate: file.normalizedName)
-            let baseNameScore = matchScore(query: query.text, candidate: file.normalizedBaseName)
-            let pathScore = matchScore(query: query.text, candidate: file.normalizedPath) / 2
-            let extensionScore = matchScore(query: query.text, candidate: file.normalizedExtension)
+            let nameScore = matchScoreNormalized(query: query.text, candidate: file.normalizedName)
+            let baseNameScore = matchScoreNormalized(query: query.text, candidate: file.normalizedBaseName)
+            let pathScore = matchScoreNormalized(query: query.text, candidate: file.normalizedPath) / 2
+            let extensionScore = matchScoreNormalized(query: query.text, candidate: file.normalizedExtension)
             score = max(nameScore + 220, baseNameScore + 180, pathScore, extensionScore + 90)
         } else if query.extensionFilter != nil || query.pathFilter != nil {
             score = 360
@@ -409,11 +447,22 @@ actor SearchIndex {
 
             while let item = enumerator?.nextObject() as? URL {
                 guard let values = try? item.resourceValues(forKeys: keys) else { continue }
+                if values.isDirectory == true {
+                    let directoryName = (values.name ?? item.lastPathComponent).lowercased()
+                    if Self.ignoredDirectoryNames.contains(directoryName) {
+                        enumerator?.skipDescendants()
+                    }
+                    continue
+                }
+
                 guard values.isRegularFile == true else { continue }
 
                 let path = item.path
                 let name = values.name ?? item.lastPathComponent
                 let fileExtension = item.pathExtension.lowercased()
+                if Self.ignoredFileExtensions.contains(fileExtension) {
+                    continue
+                }
                 let baseName = item.deletingPathExtension().lastPathComponent
                 let modifiedDate = values.contentModificationDate ?? .distantPast
                 let size = Int64(values.fileSize ?? 0)
@@ -452,6 +501,10 @@ actor SearchIndex {
     private func matchScore(query: String, candidate: String) -> Int {
         let normalizedQuery = normalize(query)
         let normalizedCandidate = normalize(candidate)
+        return matchScoreNormalized(query: normalizedQuery, candidate: normalizedCandidate)
+    }
+
+    private func matchScoreNormalized(query normalizedQuery: String, candidate normalizedCandidate: String) -> Int {
         guard !normalizedQuery.isEmpty, !normalizedCandidate.isEmpty else { return 0 }
 
         if normalizedCandidate == normalizedQuery { return 1200 }

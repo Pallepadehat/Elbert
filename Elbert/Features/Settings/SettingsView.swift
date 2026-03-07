@@ -123,6 +123,61 @@ struct SettingsView: View {
                         }
                     }
 
+                    SettingsSection("Extensions") {
+                        Text("Enable only what you need. Extensions can add UI modules and features.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        if coordinator.availableLauncherExtensions.isEmpty {
+                            Text("No extensions installed.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(coordinator.availableLauncherExtensions) { item in
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        HStack(spacing: 8) {
+                                            Toggle(
+                                                item.name,
+                                                isOn: Binding(
+                                                    get: { coordinator.isLauncherExtensionEnabled(item.id) },
+                                                    set: { coordinator.setLauncherExtensionEnabled(item.id, isEnabled: $0) }
+                                                )
+                                            )
+                                            .toggleStyle(.switch)
+
+                                            Spacer(minLength: 8)
+
+                                            Text("v\(item.version)")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(
+                                                    Capsule(style: .continuous)
+                                                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.8))
+                                                )
+                                        }
+
+                                        Text(item.summary)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+
+                                        Text("ID: \(item.id) · By \(item.author)")
+                                            .font(.caption2.monospaced())
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.55))
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     #if DEBUG
                     SettingsSection("Debug") {
                         settingsRow("Onboarding", subtitle: "Test the first-launch flow") {

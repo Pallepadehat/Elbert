@@ -29,12 +29,14 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var resultPriorityOrder: [ResultPrioritySource]
     @Published private(set) var isRebuildingIndex = false
     @Published private(set) var isBackgroundRefreshingIndex = false
+    @Published private(set) var enabledLauncherExtensionIDs: Set<String>
 
     private let hotkeyStore: HotkeyStore
     private let hotkeyManager: HotkeyManager
     private let searchIndex: SearchIndex
     private let actionExecutor: ActionExecutor
     private let defaults: UserDefaults
+    let launcherExtensionRegistry: LauncherExtensionRegistry
 
     private var launcherWindowController: LauncherWindowController?
     private var onboardingWindowController: OnboardingWindowController?
@@ -46,6 +48,7 @@ final class AppCoordinator: ObservableObject {
     private let indexedRootPathsKey = "search.indexedRootPaths"
     private let indexedRootBookmarksKey = "search.indexedRootBookmarks"
     private let resultPriorityOrderKey = "search.priority.order"
+    private let extensionEnabledStatesKey = "extensions.launcher.enabledStates"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -54,10 +57,15 @@ final class AppCoordinator: ObservableObject {
         self.hotkeyManager = HotkeyManager()
         self.searchIndex = SearchIndex()
         self.actionExecutor = ActionExecutor()
+        self.launcherExtensionRegistry = .default
         self.hotkeyShortcut = hotkeyStore.shortcut
         self.indexedRootPaths = AppCoordinator.loadIndexedRootPaths(from: defaults)
         self.indexedRootBookmarks = AppCoordinator.loadIndexedRootBookmarks(from: defaults)
         self.resultPriorityOrder = AppCoordinator.loadResultPriorityOrder(from: defaults)
+        self.enabledLauncherExtensionIDs = AppCoordinator.loadEnabledExtensionIDs(
+            from: defaults,
+            registry: launcherExtensionRegistry
+        )
         self.restoreSecurityScopedRootAccess()
 
         // LauncherState is a nested ObservableObject. SwiftUI only observes
@@ -239,6 +247,23 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    var availableLauncherExtensions: [AnyLauncherExtension] {
+        launcherExtensionRegistry.sortedEntries
+    }
+
+    func isLauncherExtensionEnabled(_ extensionID: String) -> Bool {
+        enabledLauncherExtensionIDs.contains(extensionID)
+    }
+
+    func setLauncherExtensionEnabled(_ extensionID: String, isEnabled: Bool) {
+        if isEnabled {
+            enabledLauncherExtensionIDs.insert(extensionID)
+        } else {
+            enabledLauncherExtensionIDs.remove(extensionID)
+        }
+        persistExtensionEnabledStates()
+    }
+
     private func rebuildIndexAndSearch() async {
         isRebuildingIndex = true
         defer { isRebuildingIndex = false }
@@ -341,6 +366,14 @@ final class AppCoordinator: ObservableObject {
         defaults.set(resultPriorityOrder.map(\.rawValue), forKey: resultPriorityOrderKey)
     }
 
+    private func persistExtensionEnabledStates() {
+        var stateByID: [String: Bool] = [:]
+        for entry in launcherExtensionRegistry.entries {
+            stateByID[entry.id] = enabledLauncherExtensionIDs.contains(entry.id)
+        }
+        defaults.set(stateByID, forKey: extensionEnabledStatesKey)
+    }
+
     private static func loadResultPriorityOrder(from defaults: UserDefaults) -> [ResultPrioritySource] {
         guard let raw = defaults.array(forKey: "search.priority.order") as? [String] else {
             return [.app, .file]
@@ -395,6 +428,23 @@ final class AppCoordinator: ObservableObject {
 
     private static func loadIndexedRootBookmarks(from defaults: UserDefaults) -> [String: Data] {
         defaults.dictionary(forKey: "search.indexedRootBookmarks") as? [String: Data] ?? [:]
+    }
+
+    private static func loadEnabledExtensionIDs(
+        from defaults: UserDefaults,
+        registry: LauncherExtensionRegistry
+    ) -> Set<String> {
+        let storedStates = defaults.dictionary(forKey: "extensions.launcher.enabledStates") as? [String: Bool] ?? [:]
+        var enabledIDs = Set<String>()
+
+        for entry in registry.entries {
+            let isEnabled = storedStates[entry.id] ?? entry.defaultEnabled
+            if isEnabled {
+                enabledIDs.insert(entry.id)
+            }
+        }
+
+        return enabledIDs
     }
 
     private func createSecurityScopedBookmark(for url: URL) -> Data? {

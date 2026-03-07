@@ -13,12 +13,22 @@ struct LauncherView: View {
     @State private var keyMonitor: Any?
 
     var body: some View {
-        VStack(spacing: 0) {
-            headerBar
-            searchField
-            Divider()
-            resultsPane
-            statusBar
+        ZStack(alignment: .bottomTrailing) {
+            VStack(spacing: 0) {
+                headerBar
+                searchField
+                Divider()
+                resultsPane
+                statusBar
+            }
+
+            LauncherExtensionHost(
+                registry: coordinator.launcherExtensionRegistry,
+                context: launcherExtensionContext,
+                enabledExtensionIDs: coordinator.enabledLauncherExtensionIDs
+            )
+            .padding(.trailing, 18)
+            .padding(.bottom, 18)
         }
         .background(
             RoundedRectangle(cornerRadius: AppStyle.panelCornerRadius, style: .continuous)
@@ -159,6 +169,23 @@ struct LauncherView: View {
             return coordinator.state.results.first
         }
         return coordinator.state.results.first(where: { $0.id == selectedID }) ?? coordinator.state.results.first
+    }
+
+    private var launcherExtensionContext: LauncherExtensionContext {
+        LauncherExtensionContext(
+            query: coordinator.state.query,
+            hasResults: !coordinator.state.results.isEmpty,
+            selectedResult: selectedResult,
+            actions: .init(
+                runSelectedResult: { coordinator.runSelectedResult() },
+                clearQuery: { coordinator.updateQuery("") },
+                rebuildIndex: { coordinator.rebuildIndexFromSettings() },
+                dismissLauncher: { coordinator.dismissLauncher() },
+                openSettings: {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                }
+            )
+        )
     }
 
     private func installKeyMonitor() {

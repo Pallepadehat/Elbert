@@ -20,6 +20,7 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 - **File indexing**: Index selected folders and search files by name, extension, and path tokens.
 - **Fuzzy search ranking**: Prefix, contains, subsequence, and typo-tolerant matching.
 - **Onboarding and settings**: First-run onboarding, hotkey recorder, indexed folder management, index rebuild.
+- **Extensions SDK (launcher modules)**: Install custom Swift extensions and let users enable/disable each module.
 
 ## Upcoming Features
 
@@ -59,6 +60,7 @@ These are planned features for future releases:
 Contributions are welcome. To get started, read:
 
 - `CONTRIBUTING.md`
+- `EXTENSIONS.md`
 - `CODE_OF_CONDUCT.md`
 - `SECURITY.md`
 - `ROADMAP.md`

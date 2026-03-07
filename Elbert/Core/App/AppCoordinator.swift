@@ -11,7 +11,6 @@ import AppKit
 final class AppCoordinator: ObservableObject {
     enum ResultPrioritySource: String, CaseIterable, Identifiable {
         case app
-        case plugin
         case file
 
         var id: String { rawValue }
@@ -19,7 +18,6 @@ final class AppCoordinator: ObservableObject {
         var title: String {
             switch self {
             case .app: "Apps"
-            case .plugin: "Plugins"
             case .file: "Files"
             }
         }
@@ -27,7 +25,6 @@ final class AppCoordinator: ObservableObject {
 
     @Published private(set) var state = LauncherState()
     @Published private(set) var hotkeyShortcut: HotkeyShortcut
-    @Published private(set) var pluginDirectoryPath: String = ""
     @Published private(set) var indexedRootPaths: [String]
     @Published private(set) var resultPriorityOrder: [ResultPrioritySource]
     @Published private(set) var isRebuildingIndex = false
@@ -37,7 +34,6 @@ final class AppCoordinator: ObservableObject {
     private let hotkeyManager: HotkeyManager
     private let searchIndex: SearchIndex
     private let actionExecutor: ActionExecutor
-    private let pluginManager: PluginManager
     private let defaults: UserDefaults
 
     private var launcherWindowController: LauncherWindowController?
@@ -58,7 +54,6 @@ final class AppCoordinator: ObservableObject {
         self.hotkeyManager = HotkeyManager()
         self.searchIndex = SearchIndex()
         self.actionExecutor = ActionExecutor()
-        self.pluginManager = PluginManager()
         self.hotkeyShortcut = hotkeyStore.shortcut
         self.indexedRootPaths = AppCoordinator.loadIndexedRootPaths(from: defaults)
         self.indexedRootBookmarks = AppCoordinator.loadIndexedRootBookmarks(from: defaults)
@@ -87,7 +82,7 @@ final class AppCoordinator: ObservableObject {
         }
 
         Task {
-            await reloadPluginsAndIndex()
+            await rebuildIndexAndSearch()
             registerCurrentShortcut()
             await search()
         }
@@ -159,8 +154,8 @@ final class AppCoordinator: ObservableObject {
         onboardingWindowController?.show()
     }
 
-    func reloadPluginsAndIndexFromSettings() {
-        Task { await reloadPluginsAndIndex() }
+    func rebuildIndexFromSettings() {
+        Task { await rebuildIndexAndSearch() }
     }
 
     func addIndexRootFolder() {
@@ -174,7 +169,7 @@ final class AppCoordinator: ObservableObject {
 
         guard panel.runModal() == .OK else { return }
         mergeIndexedRootFolders(panel.urls)
-        Task { await reloadPluginsAndIndex() }
+        Task { await rebuildIndexAndSearch() }
     }
 
     func removeIndexRootFolder(_ path: String) {
@@ -183,7 +178,7 @@ final class AppCoordinator: ObservableObject {
         stopAccessingSecurityScopedRoot(path: path)
         persistIndexedRootPaths()
         persistIndexedRootBookmarks()
-        Task { await reloadPluginsAndIndex() }
+        Task { await rebuildIndexAndSearch() }
     }
 
     func openIndexedRootFolder(_ path: String) {
@@ -229,14 +224,6 @@ final class AppCoordinator: ObservableObject {
         Task { await applyRankingPreferencesAndSearch() }
     }
 
-    func openPluginsFolder() {
-        let url = pluginManager.pluginDirectoryURL()
-        let opened = NSWorkspace.shared.open(url)
-        if !opened {
-            state.statusMessage = "Could not open plugins folder."
-        }
-    }
-
     func updateShortcut(_ newShortcut: HotkeyShortcut) {
         let previous = hotkeyShortcut
         hotkeyStore.update(newShortcut)
@@ -252,14 +239,11 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    private func reloadPluginsAndIndex() async {
+    private func rebuildIndexAndSearch() async {
         isRebuildingIndex = true
         defer { isRebuildingIndex = false }
         await applyRankingPreferences()
-        let plugins = await pluginManager.reloadPlugins()
-        let commands = plugins.flatMap(\.commands)
-        await searchIndex.rebuildIndex(pluginCommands: commands, fileRoots: indexedRootPaths)
-        pluginDirectoryPath = pluginManager.pluginDirectoryURL().path
+        await searchIndex.rebuildIndex(fileRoots: indexedRootPaths)
         await search()
         startBackgroundRefreshLoopIfNeeded()
     }
@@ -298,7 +282,6 @@ final class AppCoordinator: ObservableObject {
         await searchIndex.updateRankingPreferences(
             .init(
                 appBoost: boostBySource[.app] ?? 0,
-                pluginBoost: boostBySource[.plugin] ?? 0,
                 fileBoost: boostBySource[.file] ?? 0
             )
         )
@@ -360,7 +343,7 @@ final class AppCoordinator: ObservableObject {
 
     private static func loadResultPriorityOrder(from defaults: UserDefaults) -> [ResultPrioritySource] {
         guard let raw = defaults.array(forKey: "search.priority.order") as? [String] else {
-            return [.app, .plugin, .file]
+            return [.app, .file]
         }
 
         let parsed = raw.compactMap(ResultPrioritySource.init(rawValue:))

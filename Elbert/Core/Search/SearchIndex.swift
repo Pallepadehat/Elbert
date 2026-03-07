@@ -46,12 +46,10 @@ actor SearchIndex {
 
     struct RankingPreferences: Sendable {
         let appBoost: Int
-        let pluginBoost: Int
         let fileBoost: Int
 
         static let `default` = RankingPreferences(
             appBoost: 220,
-            pluginBoost: 100,
             fileBoost: 0
         )
     }
@@ -83,7 +81,6 @@ actor SearchIndex {
     }
 
     private var indexedApps: [IndexedApp] = []
-    private var indexedPluginCommands: [SearchResultItem] = []
     private var indexedFilesByPath: [String: IndexedFile] = [:]
     private var indexedFiles: [IndexedFile] = []
     private var indexedRoots: Set<String> = []
@@ -93,11 +90,9 @@ actor SearchIndex {
         rankingPreferences = preferences
     }
 
-    func rebuildIndex(pluginCommands: [PluginCommand], fileRoots: [String]) async {
+    func rebuildIndex(fileRoots: [String]) async {
         async let appItems = indexApplications()
-        async let pluginItems = indexPluginCommands(pluginCommands)
         indexedApps = await appItems
-        indexedPluginCommands = await pluginItems
         await rebuildFileIndex(rootPaths: fileRoots)
     }
 
@@ -123,7 +118,7 @@ actor SearchIndex {
     func search(query: String) async -> [SearchResultItem] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedQuery.isEmpty else {
-            return (appSuggestions() + indexedPluginCommands)
+            return appSuggestions()
                 .sorted { $0.score > $1.score }
                 .prefix(40)
                 .map { $0 }
@@ -151,21 +146,6 @@ actor SearchIndex {
             )
         }
 
-        let pluginMatches = indexedPluginCommands.compactMap { item -> SearchResultItem? in
-            let titleScore = matchScore(query: queryKey, candidate: item.title.lowercased())
-            let subtitleScore = matchScore(query: queryKey, candidate: item.subtitle.lowercased()) / 2
-            let score = max(titleScore, subtitleScore)
-            guard score > 0 else { return nil }
-            return SearchResultItem(
-                id: item.id,
-                title: item.title,
-                subtitle: item.subtitle,
-                source: item.source,
-                score: score + rankingPreferences.pluginBoost,
-                action: item.action
-            )
-        }
-
         let fileMatches = indexedFiles.compactMap { file -> SearchResultItem? in
             let score = fileMatchScore(query: fileQuery, file: file)
             guard score > 0 else { return nil }
@@ -178,7 +158,7 @@ actor SearchIndex {
             )
         }
 
-        return (appMatches + pluginMatches + fileMatches)
+        return (appMatches + fileMatches)
             .sorted { lhs, rhs in
                 if lhs.score == rhs.score {
                     return lhs.title < rhs.title
@@ -228,33 +208,6 @@ actor SearchIndex {
         let deduplicated = Dictionary(grouping: items, by: \.name)
             .compactMap { $0.value.first }
         return deduplicated.sorted { $0.name < $1.name }
-    }
-
-    private func indexPluginCommands(_ commands: [PluginCommand]) -> [SearchResultItem] {
-        commands.compactMap { command in
-            let lowerType = command.action.type.lowercased()
-            switch lowerType {
-            case "url":
-                guard let url = URL(string: command.action.value) else { return nil }
-                return SearchResultItem(
-                    title: command.title,
-                    subtitle: command.subtitle,
-                    source: "Plugin",
-                    score: 400,
-                    action: .openURL(url)
-                )
-            case "shell":
-                return SearchResultItem(
-                    title: command.title,
-                    subtitle: command.subtitle,
-                    source: "Plugin",
-                    score: 350,
-                    action: .runShellCommand(command.action.value)
-                )
-            default:
-                return nil
-            }
-        }
     }
 
     private func appSuggestions() -> [SearchResultItem] {

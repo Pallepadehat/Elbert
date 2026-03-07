@@ -1,6 +1,6 @@
 # Elbert
 
-Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open apps, run plugin commands, and stay in flow with a global shortcut.
+Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open apps, search indexed files, and stay in flow with a global shortcut.
 
 ## Preview
 
@@ -10,16 +10,16 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 
 - Fast, keyboard-first launcher experience
 - Native SwiftUI macOS app
-- Plugin manifests powered by simple JSON files
+- Configurable folder indexing for file search
 - Fuzzy search with typo tolerance
 
 ## Current Features
 
 - **Global shortcut launcher**: Open Elbert from anywhere (default: `Cmd + Shift + Space`).
 - **Application indexing**: Indexes apps from `/Applications` and `~/Applications`.
-- **Plugin commands**: Add URL and shell commands via JSON manifest files.
+- **File indexing**: Index selected folders and search files by name, extension, and path tokens.
 - **Fuzzy search ranking**: Prefix, contains, subsequence, and typo-tolerant matching.
-- **Onboarding and settings**: First-run onboarding, hotkey recorder, plugin folder access, index rebuild.
+- **Onboarding and settings**: First-run onboarding, hotkey recorder, indexed folder management, index rebuild.
 
 ## Upcoming Features
 
@@ -32,36 +32,6 @@ These are planned features for future releases:
 2. **Currency conversion**
    - Quick currency conversions from natural input.
    - Cached rates with background refresh.
-
-## Plugin Format
-
-Plugins are JSON manifests stored in:
-
-`~/Library/Application Support/Elbert/Plugins`
-
-Example:
-
-```json
-{
-  "name": "My Commands",
-  "commands": [
-    {
-      "id": "open-apple",
-      "title": "Open Apple",
-      "subtitle": "https://apple.com",
-      "action": {
-        "type": "url",
-        "value": "https://apple.com"
-      }
-    }
-  ]
-}
-```
-
-Supported action types:
-
-- `url` -> opens a URL
-- `shell` -> runs a shell command via `zsh -lc`
 
 ## Development
 
@@ -80,8 +50,7 @@ Supported action types:
 ### Architecture (high level)
 
 - `AppCoordinator`: App state and orchestration.
-- `SearchIndex`: Application and plugin command indexing + ranking.
-- `PluginManager`: Plugin manifest discovery/parsing.
+- `SearchIndex`: Application and indexed file search + ranking.
 - `ActionExecutor`: Executes selected actions (app, URL, shell).
 - `Features/*`: UI for launcher, onboarding, settings, and menu bar.
 

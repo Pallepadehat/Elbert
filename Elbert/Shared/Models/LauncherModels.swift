@@ -126,37 +126,3 @@ struct SearchResultItem: Identifiable, Hashable, Sendable {
         self.action = action
     }
 }
-
-struct PluginManifest: Sendable {
-    let name: String
-    let commands: [PluginCommand]
-
-    nonisolated init(name: String, commands: [PluginCommand]) {
-        self.name = name
-        self.commands = commands
-    }
-}
-
-struct PluginCommand: Hashable, Sendable {
-    struct Action: Hashable, Sendable {
-        let type: String
-        let value: String
-
-        nonisolated init(type: String, value: String) {
-            self.type = type
-            self.value = value
-        }
-    }
-
-    let id: String
-    let title: String
-    let subtitle: String
-    let action: Action
-
-    nonisolated init(id: String, title: String, subtitle: String, action: Action) {
-        self.id = id
-        self.title = title
-        self.subtitle = subtitle
-        self.action = action
-    }
-}

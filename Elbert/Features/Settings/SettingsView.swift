@@ -24,23 +24,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    SettingsSection("Plugins & Indexing") {
-                        settingsRow("Plugin folder") {
-                            Button("Open") {
-                                coordinator.openPluginsFolder()
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        Text(coordinator.pluginDirectoryPath)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .fixedSize(horizontal: false, vertical: true)
-
+                    SettingsSection("Indexing") {
                         settingsRow("Indexed folders", subtitle: "Choose exactly what Elbert scans") {
                             Button("Add Folder") {
                                 coordinator.addIndexRootFolder()
@@ -101,7 +85,7 @@ struct SettingsView: View {
                                 : (coordinator.isBackgroundRefreshingIndex ? "Refreshing in background…" : "Up to date")
                         ) {
                             Button {
-                                coordinator.reloadPluginsAndIndexFromSettings()
+                                coordinator.rebuildIndexFromSettings()
                             } label: {
                                 if coordinator.isRebuildingIndex {
                                     ProgressView()

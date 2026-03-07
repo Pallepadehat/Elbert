@@ -61,7 +61,7 @@ This roadmap focuses on the next major feature set for Elbert.
 - Finalize repository docs and governance.
 - Add issue labels and triage workflow.
 - Add CI checks (build + basic tests/linting).
-- Expand docs for plugin authoring and architecture.
+- Expand docs for indexing architecture and future extension points.
 
 ### Exit Criteria
 

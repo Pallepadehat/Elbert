@@ -9,7 +9,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     private enum Step: Int, CaseIterable {
-        case welcome, hotkey, plugins, finish
+        case welcome, hotkey, finish
     }
 
     @EnvironmentObject private var coordinator: AppCoordinator
@@ -62,7 +62,6 @@ struct OnboardingView: View {
         switch step {
         case .welcome:  welcomeStep
         case .hotkey:   hotkeyStep
-        case .plugins:  pluginsStep
         case .finish:   finishStep
         }
     }
@@ -72,7 +71,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 12) {
                 FeatureRow(icon: "bolt.fill",                 title: "Fast launcher",    subtitle: "Open Elbert and jump to the right app in a few keystrokes.")
                 FeatureRow(icon: "command",                   title: "Global shortcut",  subtitle: "Bring it up anytime with your preferred key combination.")
-                FeatureRow(icon: "puzzlepiece.extension.fill",title: "Plugin commands",  subtitle: "Drop plugin manifests into your folder and rebuild when needed.")
+                FeatureRow(icon: "folder.fill",               title: "File indexing",    subtitle: "Index selected folders and open files instantly from search.")
             }
         }
     }
@@ -85,55 +84,6 @@ struct OnboardingView: View {
                     current: coordinator.hotkeyShortcut,
                     onRecord: { coordinator.updateShortcut($0) }
                 )
-            }
-        }
-    }
-
-    private var pluginsStep: some View {
-        card {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Plugin Folder").font(.headline)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Location")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Text(coordinator.pluginDirectoryPath)
-                        .font(.system(.footnote, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
-                )
-
-                HStack(spacing: 8) {
-                    Button { coordinator.openPluginsFolder() } label: {
-                        Label("Open Folder", systemImage: "folder.badge.plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-
-                    Button { coordinator.reloadPluginsAndIndexFromSettings() } label: {
-                        Label(
-                            coordinator.isRebuildingIndex ? "Rebuilding…" : "Rebuild Index",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(coordinator.isRebuildingIndex)
-                }
-
-                Text("Drop JSON plugin manifests into the folder above, then tap Rebuild.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -179,7 +129,6 @@ struct OnboardingView: View {
         switch step {
         case .welcome: "Welcome to Elbert"
         case .hotkey:  "Set your shortcut"
-        case .plugins: "Plugins and indexing"
         case .finish:  "All set"
         }
     }
@@ -188,8 +137,7 @@ struct OnboardingView: View {
         switch step {
         case .welcome: "A clean launcher built for speed. Find, run, and move."
         case .hotkey:  "Pick a shortcut you can trigger from anywhere."
-        case .plugins: "Open your plugin folder and refresh your index in one click."
-        case .finish:  "You're ready to launch apps and plugin commands instantly."
+        case .finish:  "You're ready to launch apps and indexed files instantly."
         }
     }
 

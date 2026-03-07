@@ -22,7 +22,6 @@ Thanks for your interest in contributing to Elbert.
 - Keep architecture boundaries clear:
   - Coordination/state in `AppCoordinator`
   - Indexing/search in `SearchIndex`
-  - Plugin loading in `PluginManager`
   - Action execution in `ActionExecutor`
 - Use clear naming and small, testable units.
 
@@ -32,8 +31,8 @@ Before opening a PR, verify:
 
 - App builds cleanly in Xcode.
 - Global shortcut registration still works.
-- Launcher search works for apps and plugin commands.
-- Plugin folder open/rebuild actions work.
+- Launcher search works for apps and indexed files.
+- Indexed folder add/remove/open and rebuild actions work.
 - No obvious UI regressions in onboarding/settings/launcher.
 
 ## Pull Requests
@@ -44,14 +43,6 @@ Please include:
 - Screenshots/GIFs for UI changes when relevant.
 - Manual test notes.
 - Linked issue(s), if any.
-
-## Plugin Contributions
-
-If your PR adds plugin-related functionality:
-
-- Document expected manifest format updates.
-- Include migration guidance for existing manifests.
-- Keep parser behavior explicit and backward compatible where possible.
 
 ## Reporting Bugs
 

@@ -47,6 +47,8 @@ actor SpeechCaptureService: SpeechCapturing {
     private var lastConfidence: Double?
     private var captureError: Error?
     private var isCapturing = false
+    private var smoothedLevel: Double = 0
+    private var levelHandler: (@Sendable (Double) -> Void)?
 
     init(localeIdentifier: String = Locale.current.identifier) {
         self.localeIdentifier = localeIdentifier
@@ -56,6 +58,11 @@ actor SpeechCaptureService: SpeechCapturing {
         let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         localeIdentifier = trimmed
+    }
+
+    func setLevelHandler(_ handler: (@Sendable (Double) -> Void)?) async {
+        levelHandler = handler
+        handler?(smoothedLevel)
     }
 
     func startCapture() async throws {
@@ -78,6 +85,8 @@ actor SpeechCaptureService: SpeechCapturing {
         lastTranscript = ""
         lastConfidence = nil
         captureError = nil
+        smoothedLevel = 0
+        emitLevel(0)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
@@ -132,6 +141,8 @@ actor SpeechCaptureService: SpeechCapturing {
         lastTranscript = ""
         lastConfidence = nil
         captureError = nil
+        smoothedLevel = 0
+        emitLevel(0)
     }
 
     private func handleRecognitionUpdate(result: SFSpeechRecognitionResult?, error: Error?) {
@@ -149,6 +160,14 @@ actor SpeechCaptureService: SpeechCapturing {
 
     private func appendAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         recognitionRequest?.append(buffer)
+
+        let currentLevel = normalizedLevel(from: buffer)
+        if currentLevel >= smoothedLevel {
+            smoothedLevel = smoothedLevel * 0.58 + currentLevel * 0.42
+        } else {
+            smoothedLevel = smoothedLevel * 0.88 + currentLevel * 0.12
+        }
+        emitLevel(smoothedLevel)
     }
 
     private func endAudioPipeline(cancelTask: Bool) {
@@ -167,5 +186,29 @@ actor SpeechCaptureService: SpeechCapturing {
 
         recognitionRequest = nil
         recognitionTask = nil
+        emitLevel(0)
+    }
+
+    private func emitLevel(_ value: Double) {
+        let clamped = min(max(value, 0), 1)
+        levelHandler?(clamped)
+    }
+
+    private func normalizedLevel(from buffer: AVAudioPCMBuffer) -> Double {
+        guard let channelData = buffer.floatChannelData else { return 0 }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return 0 }
+
+        let samples = UnsafeBufferPointer(start: channelData[0], count: frameCount)
+        var sum: Float = 0
+        for sample in samples {
+            sum += sample * sample
+        }
+
+        let rms = sqrt(sum / Float(frameCount))
+        let decibels = 20 * log10(max(rms, 0.000_000_1))
+        let minDB: Float = -55
+        let clamped = min(max(decibels, minDB), 0)
+        return Double((clamped - minDB) / -minDB)
     }
 }

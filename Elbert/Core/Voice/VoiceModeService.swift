@@ -40,6 +40,10 @@ actor VoiceModeService {
         await speechCapturer.updateLocaleIdentifier(identifier)
     }
 
+    func setLevelHandler(_ handler: (@Sendable (Double) -> Void)?) async {
+        await speechCapturer.setLevelHandler(handler)
+    }
+
     func prepareForCapture() async -> VoiceCapabilityStatus {
         _ = await capabilityChecker.requestAuthorizationsIfNeeded()
         return await capabilityChecker.capabilityStatus()

@@ -7,6 +7,7 @@ import Foundation
 
 protocol SpeechCapturing: Sendable {
     func updateLocaleIdentifier(_ identifier: String) async
+    func setLevelHandler(_ handler: (@Sendable (Double) -> Void)?) async
     func startCapture() async throws
     func stopCapture() async throws -> SpeechCaptureOutput
     func cancelCapture() async

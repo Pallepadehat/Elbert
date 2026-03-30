@@ -17,6 +17,14 @@ enum TranscriptRefinementError: Error, LocalizedError {
     }
 }
 
+@Generable(description: "Normalized launcher command text")
+private struct VoiceCommandNormalization {
+    @Guide(
+        description: "Final concise launcher query. Keep only final user intent. No explanations."
+    )
+    var query: String
+}
+
 struct TranscriptRefinementService: TranscriptRefining {
     private let capabilityChecker: VoiceCapabilityChecking
 
@@ -34,16 +42,31 @@ struct TranscriptRefinementService: TranscriptRefining {
         let session = LanguageModelSession(
             model: model,
             instructions: """
-            You normalize voice transcripts into concise launcher query text.
-            Keep output short and literal. Do not explain.
-            If user self-corrects (like 'no wait'), keep only the final intent.
-            Preserve calculator expressions and app names.
-            Output only the query string.
+            Normalize speech transcripts into launcher queries.
+            Keep output short, literal, and executable as a search query.
+            If user self-corrects (for example "no wait"), keep only final intent.
+            Preserve app names, file names, and calculator expressions exactly.
             """
         )
 
-        let response = try await session.respond(to: "Transcript: \(transcript)")
-        let refined = sanitize(response.content)
+        let prompt = """
+        Transcript: \(transcript)
+        Return the final launcher query.
+        """
+
+        let refined: String
+        do {
+            // Constrained generation avoids malformed or chatty free-form output.
+            let response = try await session.respond(
+                to: prompt,
+                generating: VoiceCommandNormalization.self
+            )
+            refined = sanitize(response.content.query)
+        } catch {
+            // Fallback keeps voice usable if constrained decoding fails for any reason.
+            let fallback = try await session.respond(to: prompt)
+            refined = sanitize(fallback.content)
+        }
 
         let finalQuery = refined.isEmpty ? transcript.trimmingCharacters(in: .whitespacesAndNewlines) : refined
         return VoiceProcessingResult(finalQuery: finalQuery, rawTranscript: transcript, confidence: confidence)

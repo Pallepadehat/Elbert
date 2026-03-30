@@ -33,6 +33,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var isVoiceModeEnabled: Bool
     @Published private(set) var voicePushToTalkModifier: VoicePushToTalkModifier
     @Published private(set) var voiceLocaleIdentifier: String
+    @Published private(set) var voiceInputLevel: Double = 0
     @Published private(set) var voiceAvailabilityText: String = "Checking…"
     @Published private(set) var voicePermissionText: String = "Checking…"
     @Published private(set) var shouldShowVoicePermissionShortcut = false
@@ -47,6 +48,7 @@ final class AppCoordinator: ObservableObject {
     private var launcherWindowController: LauncherWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var didStart = false
+    private var didConfigureVoiceMetering = false
     private var cancellables = Set<AnyCancellable>()
     private var backgroundRefreshTask: Task<Void, Never>?
     private var indexedRootBookmarks: [String: Data]
@@ -106,6 +108,7 @@ final class AppCoordinator: ObservableObject {
         }
 
         Task {
+            configureVoiceMeteringIfNeeded()
             await rebuildIndexAndSearch()
             registerCurrentShortcut()
             await refreshVoiceAvailability()
@@ -271,6 +274,7 @@ final class AppCoordinator: ObservableObject {
         if !isEnabled {
             cancelVoiceCapture()
             voiceCaptureState = .idle
+            voiceInputLevel = 0
             state.statusMessage = nil
         }
     }
@@ -406,6 +410,7 @@ final class AppCoordinator: ObservableObject {
                     voiceCaptureState = .idle
                     state.statusMessage = nil
                 }
+                voiceInputLevel = 0
             }
         }
     }
@@ -446,6 +451,19 @@ final class AppCoordinator: ObservableObject {
                 voiceCaptureState = .unavailable("Voice unavailable on this Mac")
             } else if case .unavailable = voiceCaptureState {
                 voiceCaptureState = .idle
+            }
+        }
+    }
+
+    private func configureVoiceMeteringIfNeeded() {
+        guard !didConfigureVoiceMetering else { return }
+        didConfigureVoiceMetering = true
+
+        Task {
+            await voiceModeService.setLevelHandler { [weak self] level in
+                Task { @MainActor [weak self] in
+                    self?.voiceInputLevel = level
+                }
             }
         }
     }

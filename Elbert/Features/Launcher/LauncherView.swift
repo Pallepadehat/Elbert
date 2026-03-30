@@ -142,6 +142,8 @@ struct LauncherView: View {
             } else {
                 ResultsList(
                     results: coordinator.state.results,
+                    query: coordinator.state.query,
+                    isFuzzyModeEnabled: coordinator.isFuzzyModeEnabled,
                     selectedID: coordinator.state.selectedResultID,
                     onRun: { coordinator.run(result: $0) },
                     onRevealInFinder: { coordinator.revealFileInFinder(for: $0) },
@@ -464,6 +466,8 @@ private struct CalculatorResultPane: View {
 
 private struct ResultsList: View {
     let results: [SearchResultItem]
+    let query: String
+    let isFuzzyModeEnabled: Bool
     let selectedID: SearchResultItem.ID?
     let onRun: (SearchResultItem) -> Void
     let onRevealInFinder: (SearchResultItem) -> Void
@@ -476,6 +480,8 @@ private struct ResultsList: View {
                     ForEach(results) { item in
                         ResultRow(
                             item: item,
+                            query: query,
+                            isFuzzyModeEnabled: isFuzzyModeEnabled,
                             isSelected: selectedID == item.id,
                             action: { onRun(item) },
                             onRevealInFinder: { onRevealInFinder(item) },
@@ -503,6 +509,8 @@ private struct ResultsList: View {
 
 private struct ResultRow: View {
     let item: SearchResultItem
+    let query: String
+    let isFuzzyModeEnabled: Bool
     let isSelected: Bool
     let action: () -> Void
     let onRevealInFinder: () -> Void
@@ -514,9 +522,8 @@ private struct ResultRow: View {
                 ResultIconView(item: item)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
+                    highlightedTitleText
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     Text(item.subtitle)
                         .font(.system(size: 11))
@@ -561,6 +568,95 @@ private struct ResultRow: View {
                 Button("Copy Path", action: onCopyPath)
             }
         }
+    }
+
+    private var highlightedTitleText: Text {
+        guard isFuzzyModeEnabled else {
+            return Text(item.title).foregroundStyle(.primary)
+        }
+
+        let positions = matchedTitlePositions()
+        guard !positions.isEmpty else {
+            return Text(item.title).foregroundStyle(.primary)
+        }
+
+        var attributed = AttributedString(item.title)
+        let characterCount = attributed.characters.count
+        for position in positions.sorted() {
+            guard position >= 0, position < characterCount else {
+                continue
+            }
+            let start = attributed.index(attributed.startIndex, offsetByCharacters: position)
+            let end = attributed.index(start, offsetByCharacters: 1)
+
+            attributed[start..<end].underlineStyle = .single
+            attributed[start..<end].foregroundColor = .accentColor
+        }
+
+        return Text(attributed).foregroundStyle(.primary)
+    }
+
+    private func matchedTitlePositions() -> Set<Int> {
+        let normalizedTitle = normalizeForMatching(item.title)
+        guard !normalizedTitle.isEmpty else { return [] }
+
+        let tokens = queryTokens(from: query)
+        guard !tokens.isEmpty else { return [] }
+
+        var matched = Set<Int>()
+        for token in tokens {
+            if let range = normalizedTitle.range(of: token) {
+                let start = normalizedTitle.distance(from: normalizedTitle.startIndex, to: range.lowerBound)
+                let length = normalizedTitle.distance(from: range.lowerBound, to: range.upperBound)
+                for index in start..<(start + length) {
+                    matched.insert(index)
+                }
+                continue
+            }
+
+            let titleChars = Array(normalizedTitle)
+            let tokenChars = Array(token)
+            var tokenIndex = 0
+            var positions: [Int] = []
+
+            for (titleIndex, titleChar) in titleChars.enumerated() {
+                guard tokenIndex < tokenChars.count else { break }
+                if titleChar == tokenChars[tokenIndex] {
+                    positions.append(titleIndex)
+                    tokenIndex += 1
+                }
+            }
+
+            if tokenIndex == tokenChars.count {
+                for position in positions {
+                    matched.insert(position)
+                }
+            }
+        }
+
+        return matched
+    }
+
+    private func queryTokens(from query: String) -> [String] {
+        let normalized = normalizeForMatching(query)
+        return normalized
+            .split(separator: " ")
+            .compactMap { part in
+                let token = String(part)
+                if token.hasPrefix("ext:") || token.hasPrefix("in:") {
+                    return nil
+                }
+                return token.isEmpty ? nil : token
+            }
+    }
+
+    private func normalizeForMatching(_ value: String) -> String {
+        value
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

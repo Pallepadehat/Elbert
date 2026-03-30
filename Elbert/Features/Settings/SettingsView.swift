@@ -99,6 +99,18 @@ struct SettingsView: View {
                             .disabled(coordinator.isRebuildingIndex)
                         }
 
+                        settingsRow("Fuzzy mode", subtitle: "Allows partial and typo-tolerant matches (e.g. gma → figma)") {
+                            Toggle(
+                                "Enable",
+                                isOn: Binding(
+                                    get: { coordinator.isFuzzyModeEnabled },
+                                    set: { coordinator.setFuzzyModeEnabled($0) }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Result priority")
                                 .font(.subheadline)

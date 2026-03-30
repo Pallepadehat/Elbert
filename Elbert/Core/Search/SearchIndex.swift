@@ -45,12 +45,19 @@ actor SearchIndex {
     ]
 
     struct RankingPreferences: Sendable {
+        enum MatchingMode: String, Sendable {
+            case strict
+            case fuzzy
+        }
+
         let appBoost: Int
         let fileBoost: Int
+        let matchingMode: MatchingMode
 
         static let `default` = RankingPreferences(
             appBoost: 220,
-            fileBoost: 0
+            fileBoost: 0,
+            matchingMode: .fuzzy
         )
     }
 
@@ -460,12 +467,14 @@ actor SearchIndex {
     private func matchScoreNormalized(query normalizedQuery: String, candidate normalizedCandidate: String) -> Int {
         guard !normalizedQuery.isEmpty, !normalizedCandidate.isEmpty else { return 0 }
 
-        if normalizedCandidate == normalizedQuery { return 1200 }
-        if normalizedCandidate.hasPrefix(normalizedQuery) { return 1000 - normalizedCandidate.count }
-        if wordPrefixMatch(query: normalizedQuery, candidate: normalizedCandidate) {
-            return 860 - normalizedCandidate.count
+        let strictScore = strictMatchScoreNormalized(query: normalizedQuery, candidate: normalizedCandidate)
+        if strictScore > 0 {
+            return strictScore
         }
-        if normalizedCandidate.contains(normalizedQuery) { return 760 - normalizedCandidate.count }
+
+        guard rankingPreferences.matchingMode == .fuzzy else {
+            return 0
+        }
 
         let subsequence = subsequenceScore(query: normalizedQuery, candidate: normalizedCandidate)
         if subsequence > 0 {
@@ -478,6 +487,18 @@ actor SearchIndex {
             if distance <= 2 {
                 return 520 - (distance * 120) - normalizedCandidate.count
             }
+        }
+
+        return 0
+    }
+
+    private func strictMatchScoreNormalized(query normalizedQuery: String, candidate normalizedCandidate: String) -> Int {
+        guard !normalizedQuery.isEmpty, !normalizedCandidate.isEmpty else { return 0 }
+
+        if normalizedCandidate == normalizedQuery { return 1200 }
+        if normalizedCandidate.hasPrefix(normalizedQuery) { return 1000 - normalizedCandidate.count }
+        if wordPrefixMatch(query: normalizedQuery, candidate: normalizedCandidate) {
+            return 860 - normalizedCandidate.count
         }
 
         return 0

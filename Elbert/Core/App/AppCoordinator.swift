@@ -27,6 +27,7 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var hotkeyShortcut: HotkeyShortcut
     @Published private(set) var indexedRootPaths: [String]
     @Published private(set) var resultPriorityOrder: [ResultPrioritySource]
+    @Published private(set) var isFuzzyModeEnabled: Bool
     @Published private(set) var isRebuildingIndex = false
     @Published private(set) var isBackgroundRefreshingIndex = false
     @Published private(set) var voiceCaptureState: VoiceCaptureState = .idle
@@ -56,6 +57,7 @@ final class AppCoordinator: ObservableObject {
     private let indexedRootPathsKey = "search.indexedRootPaths"
     private let indexedRootBookmarksKey = "search.indexedRootBookmarks"
     private let resultPriorityOrderKey = "search.priority.order"
+    private let fuzzyModeEnabledKey = "search.fuzzy.enabled"
     private let voiceModeEnabledKey = "voice.mode.enabled"
     private let voicePushToTalkModifierKey = "voice.pushToTalk.modifier"
     private let voiceLocaleIdentifierKey = "voice.locale.identifier"
@@ -83,6 +85,7 @@ final class AppCoordinator: ObservableObject {
         self.indexedRootPaths = AppCoordinator.loadIndexedRootPaths(from: defaults)
         self.indexedRootBookmarks = AppCoordinator.loadIndexedRootBookmarks(from: defaults)
         self.resultPriorityOrder = AppCoordinator.loadResultPriorityOrder(from: defaults)
+        self.isFuzzyModeEnabled = AppCoordinator.loadFuzzyModeEnabled(from: defaults)
         self.isVoiceModeEnabled = AppCoordinator.loadVoiceModeEnabled(from: defaults)
         self.restoreSecurityScopedRootAccess()
 
@@ -249,6 +252,12 @@ final class AppCoordinator: ObservableObject {
 
     func moveResultPriority(fromOffsets: IndexSet, toOffset: Int) {
         resultPriorityOrder = reordered(resultPriorityOrder, fromOffsets: fromOffsets, toOffset: toOffset)
+        persistRankingPreferences()
+        Task { await applyRankingPreferencesAndSearch() }
+    }
+
+    func setFuzzyModeEnabled(_ isEnabled: Bool) {
+        isFuzzyModeEnabled = isEnabled
         persistRankingPreferences()
         Task { await applyRankingPreferencesAndSearch() }
     }
@@ -480,16 +489,18 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func applyRankingPreferences() async {
+        let sourcePriorityStep = 4_000
         var boostBySource: [ResultPrioritySource: Int] = [:]
         for (index, source) in resultPriorityOrder.enumerated() {
-            // Highest row gets the largest boost.
-            boostBySource[source] = (resultPriorityOrder.count - index - 1) * 160
+            // Keep prioritized sources consistently above lower-priority sources.
+            boostBySource[source] = (resultPriorityOrder.count - index - 1) * sourcePriorityStep
         }
 
         await searchIndex.updateRankingPreferences(
             .init(
                 appBoost: boostBySource[.app] ?? 0,
-                fileBoost: boostBySource[.file] ?? 0
+                fileBoost: boostBySource[.file] ?? 0,
+                matchingMode: isFuzzyModeEnabled ? .fuzzy : .strict
             )
         )
     }
@@ -546,6 +557,7 @@ final class AppCoordinator: ObservableObject {
 
     private func persistRankingPreferences() {
         defaults.set(resultPriorityOrder.map(\.rawValue), forKey: resultPriorityOrderKey)
+        defaults.set(isFuzzyModeEnabled, forKey: fuzzyModeEnabledKey)
     }
 
     private static func loadResultPriorityOrder(from defaults: UserDefaults) -> [ResultPrioritySource] {
@@ -561,6 +573,13 @@ final class AppCoordinator: ObservableObject {
         let missing = ResultPrioritySource.allCases.filter { !existing.contains($0) }
         let completed = unique + missing
         return completed.filter { all.contains($0) }
+    }
+
+    private static func loadFuzzyModeEnabled(from defaults: UserDefaults) -> Bool {
+        if defaults.object(forKey: "search.fuzzy.enabled") == nil {
+            return true
+        }
+        return defaults.bool(forKey: "search.fuzzy.enabled")
     }
 
     private func reordered(

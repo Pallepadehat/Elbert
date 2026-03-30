@@ -18,8 +18,17 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 - **Global shortcut launcher**: Open Elbert from anywhere (default: `Cmd + Shift + Space`).
 - **Application indexing**: Indexes apps from `/Applications` and `~/Applications`.
 - **File indexing**: Index selected folders and search files by name, extension, and path tokens.
-- **Fuzzy search ranking**: Prefix, contains, subsequence, and typo-tolerant matching.
-- **Onboarding and settings**: First-run onboarding, hotkey recorder, indexed folder management, index rebuild.
+- **Configurable search matching**: Toggle fuzzy mode in Settings (fuzzy with typo tolerance or strict matching only).
+- **Result match highlighting**: Query-matched title segments are highlighted when fuzzy mode is enabled.
+- **Local voice mode**: Push-to-talk voice query capture in launcher with real-time audio visualizer.
+- **Voice controls in settings**: Configure voice mode, push-to-talk modifier key, and speech locale/language.
+- **Voice availability and permissions checks**: Built-in status + shortcut to system settings when permissions are denied.
+- **Onboarding and settings**: First-run onboarding, hotkey recorder, indexed folder management, and index rebuild.
+
+## Latest Merged PRs
+
+- **PR #4**: Added fuzzy mode toggle, strict matching mode, and query-highlighted launcher results.
+- **PR #3**: Added local Apple voice mode foundation with configurable push-to-talk and reactive visualizer.
 
 ## Upcoming Features
 

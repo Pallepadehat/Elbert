@@ -11,6 +11,7 @@ struct LauncherView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     @FocusState private var isSearchFocused: Bool
     @State private var keyMonitor: Any?
+    @State private var isHoldingPushToTalk = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +35,10 @@ struct LauncherView: View {
         }
         .onDisappear {
             removeKeyMonitor()
+            if isHoldingPushToTalk {
+                isHoldingPushToTalk = false
+                coordinator.cancelVoiceCapture()
+            }
         }
         .onChange(of: coordinator.state.isLauncherVisible) { _, isVisible in
             if isVisible { focusSearchField() }
@@ -50,14 +55,39 @@ struct LauncherView: View {
             Text("Elbert")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
+            voiceStateBadge
             Spacer()
-            Text("↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
+            Text("Hold ⌥ talk · ↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var voiceStateBadge: some View {
+        switch coordinator.voiceCaptureState {
+        case .idle:
+            EmptyView()
+        case .listening:
+            Label("Listening", systemImage: "mic.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.red)
+        case .processing:
+            Label("Processing", systemImage: "waveform")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        case .unavailable:
+            Label("Voice unavailable", systemImage: "exclamationmark.triangle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        case .error:
+            Label("Voice error", systemImage: "xmark.octagon")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var searchField: some View {
@@ -163,8 +193,13 @@ struct LauncherView: View {
 
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard coordinator.state.isLauncherVisible else { return event }
+
+            if event.type == .flagsChanged {
+                handlePushToTalkModifierChange(event)
+                return event
+            }
 
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if modifiers == .command {
@@ -199,6 +234,30 @@ struct LauncherView: View {
                 return event
             }
         }
+    }
+
+    private func handlePushToTalkModifierChange(_ event: NSEvent) {
+        let optionOnly = isOptionOnlyModifier(event.modifierFlags)
+
+        if optionOnly, !isHoldingPushToTalk {
+            isHoldingPushToTalk = true
+            coordinator.startVoiceCapture()
+            return
+        }
+
+        if !optionOnly, isHoldingPushToTalk {
+            isHoldingPushToTalk = false
+            coordinator.stopVoiceCaptureAndProcess()
+        }
+    }
+
+    private func isOptionOnlyModifier(_ flags: NSEvent.ModifierFlags) -> Bool {
+        let significant = flags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+
+        let optionOnly: NSEvent.ModifierFlags = [.option]
+        return significant == optionOnly
     }
 
     private func removeKeyMonitor() {

@@ -262,6 +262,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Elbert;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Elbert uses the microphone for local push-to-talk voice commands.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Elbert uses on-device speech recognition to transcribe your voice commands locally.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -297,6 +299,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = Elbert;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Elbert uses the microphone for local push-to-talk voice commands.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Elbert uses on-device speech recognition to transcribe your voice commands locally.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

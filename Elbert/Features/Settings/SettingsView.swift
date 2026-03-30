@@ -123,6 +123,37 @@ struct SettingsView: View {
                         }
                     }
 
+                    SettingsSection("Voice") {
+                        settingsRow("Voice mode", subtitle: "Hold Option in launcher to push-to-talk") {
+                            Toggle(
+                                "Enable",
+                                isOn: Binding(
+                                    get: { coordinator.isVoiceModeEnabled },
+                                    set: { coordinator.setVoiceModeEnabled($0) }
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                        }
+
+                        settingsRow("Availability", subtitle: coordinator.voiceAvailabilityText) {
+                            Button("Refresh") {
+                                coordinator.refreshVoiceAvailabilityFromSettings()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+
+                        settingsRow("Permissions", subtitle: coordinator.voicePermissionText) {
+                            Button("Open System Settings") {
+                                coordinator.openVoicePermissionSettings()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(!coordinator.shouldShowVoicePermissionShortcut)
+                        }
+                    }
+
                     #if DEBUG
                     SettingsSection("Debug") {
                         settingsRow("Onboarding", subtitle: "Test the first-launch flow") {

@@ -29,16 +29,26 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var resultPriorityOrder: [ResultPrioritySource]
     @Published private(set) var isRebuildingIndex = false
     @Published private(set) var isBackgroundRefreshingIndex = false
+    @Published private(set) var voiceCaptureState: VoiceCaptureState = .idle
+    @Published private(set) var isVoiceModeEnabled: Bool
+    @Published private(set) var voicePushToTalkModifier: VoicePushToTalkModifier
+    @Published private(set) var voiceLocaleIdentifier: String
+    @Published private(set) var voiceInputLevel: Double = 0
+    @Published private(set) var voiceAvailabilityText: String = "Checking…"
+    @Published private(set) var voicePermissionText: String = "Checking…"
+    @Published private(set) var shouldShowVoicePermissionShortcut = false
 
     private let hotkeyStore: HotkeyStore
     private let hotkeyManager: HotkeyManager
     private let searchIndex: SearchIndex
     private let actionExecutor: ActionExecutor
+    private let voiceModeService: VoiceModeService
     private let defaults: UserDefaults
 
     private var launcherWindowController: LauncherWindowController?
     private var onboardingWindowController: OnboardingWindowController?
     private var didStart = false
+    private var didConfigureVoiceMetering = false
     private var cancellables = Set<AnyCancellable>()
     private var backgroundRefreshTask: Task<Void, Never>?
     private var indexedRootBookmarks: [String: Data]
@@ -46,6 +56,9 @@ final class AppCoordinator: ObservableObject {
     private let indexedRootPathsKey = "search.indexedRootPaths"
     private let indexedRootBookmarksKey = "search.indexedRootBookmarks"
     private let resultPriorityOrderKey = "search.priority.order"
+    private let voiceModeEnabledKey = "voice.mode.enabled"
+    private let voicePushToTalkModifierKey = "voice.pushToTalk.modifier"
+    private let voiceLocaleIdentifierKey = "voice.locale.identifier"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -54,10 +67,23 @@ final class AppCoordinator: ObservableObject {
         self.hotkeyManager = HotkeyManager()
         self.searchIndex = SearchIndex()
         self.actionExecutor = ActionExecutor()
+        let voicePushToTalkModifier = AppCoordinator.loadVoicePushToTalkModifier(from: defaults)
+        let voiceLocaleIdentifier = AppCoordinator.loadVoiceLocaleIdentifier(from: defaults)
+        self.voicePushToTalkModifier = voicePushToTalkModifier
+        self.voiceLocaleIdentifier = voiceLocaleIdentifier
+        let voiceCapabilityChecker = VoiceAvailabilityService(localeIdentifier: voiceLocaleIdentifier)
+        let speechCapturer = SpeechCaptureService(localeIdentifier: voiceLocaleIdentifier)
+        let transcriptRefiner = TranscriptRefinementService(capabilityChecker: voiceCapabilityChecker)
+        self.voiceModeService = VoiceModeService(
+            speechCapturer: speechCapturer,
+            transcriptRefiner: transcriptRefiner,
+            capabilityChecker: voiceCapabilityChecker
+        )
         self.hotkeyShortcut = hotkeyStore.shortcut
         self.indexedRootPaths = AppCoordinator.loadIndexedRootPaths(from: defaults)
         self.indexedRootBookmarks = AppCoordinator.loadIndexedRootBookmarks(from: defaults)
         self.resultPriorityOrder = AppCoordinator.loadResultPriorityOrder(from: defaults)
+        self.isVoiceModeEnabled = AppCoordinator.loadVoiceModeEnabled(from: defaults)
         self.restoreSecurityScopedRootAccess()
 
         // LauncherState is a nested ObservableObject. SwiftUI only observes
@@ -82,8 +108,10 @@ final class AppCoordinator: ObservableObject {
         }
 
         Task {
+            configureVoiceMeteringIfNeeded()
             await rebuildIndexAndSearch()
             registerCurrentShortcut()
+            await refreshVoiceAvailability()
             await search()
         }
     }
@@ -102,6 +130,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     func dismissLauncher() {
+        cancelVoiceCapture()
         launcherWindowController?.hide()
         state.isLauncherVisible = false
     }
@@ -239,6 +268,153 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    func setVoiceModeEnabled(_ isEnabled: Bool) {
+        isVoiceModeEnabled = isEnabled
+        defaults.set(isEnabled, forKey: voiceModeEnabledKey)
+        if !isEnabled {
+            cancelVoiceCapture()
+            voiceCaptureState = .idle
+            voiceInputLevel = 0
+            state.statusMessage = nil
+        }
+    }
+
+    func setVoicePushToTalkModifier(_ modifier: VoicePushToTalkModifier) {
+        voicePushToTalkModifier = modifier
+        defaults.set(modifier.rawValue, forKey: voicePushToTalkModifierKey)
+    }
+
+    func setVoiceLocaleIdentifier(_ identifier: String) {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        voiceLocaleIdentifier = trimmed
+        defaults.set(trimmed, forKey: voiceLocaleIdentifierKey)
+
+        Task {
+            await voiceModeService.updateLocaleIdentifier(trimmed)
+            await refreshVoiceAvailability()
+        }
+    }
+
+    var voiceLocaleOptions: [String] {
+        let seed = [
+            voiceLocaleIdentifier,
+            Locale.current.identifier,
+            "en-US",
+            "da-DK",
+            "en-GB",
+            "de-DE",
+            "fr-FR",
+            "es-ES"
+        ]
+
+        var seen = Set<String>()
+        return seed
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+    }
+
+    func refreshVoiceAvailabilityFromSettings() {
+        Task { await refreshVoiceAvailability() }
+    }
+
+    func openVoicePermissionSettings() {
+        let urls = [
+            URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Microphone"),
+            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
+            URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_SpeechRecognition"),
+            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")
+        ]
+
+        for candidate in urls.compactMap({ $0 }) {
+            if NSWorkspace.shared.open(candidate) {
+                return
+            }
+        }
+    }
+
+    func startVoiceCapture() {
+        guard state.isLauncherVisible else { return }
+        guard isVoiceModeEnabled else { return }
+        guard voiceCaptureState != .listening else { return }
+
+        Task {
+            let availability = await voiceModeService.prepareForCapture()
+            await MainActor.run {
+                applyVoiceAvailability(availability)
+            }
+
+            guard availability.isVoiceModeSupported else {
+                await MainActor.run {
+                    voiceCaptureState = .unavailable("Voice unavailable on this Mac")
+                    state.statusMessage = "Voice unavailable on this Mac"
+                }
+                return
+            }
+
+            guard availability.authorization.isFullyAuthorized else {
+                await MainActor.run {
+                    voiceCaptureState = .error("Microphone and Speech permissions are required")
+                    state.statusMessage = "Grant Microphone and Speech permissions in Settings."
+                }
+                return
+            }
+
+            do {
+                try await voiceModeService.startCapture()
+                await MainActor.run {
+                    voiceCaptureState = .listening
+                    state.statusMessage = "Listening…"
+                }
+            } catch {
+                await MainActor.run {
+                    voiceCaptureState = .error(error.localizedDescription)
+                    state.statusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func stopVoiceCaptureAndProcess() {
+        guard voiceCaptureState == .listening else { return }
+        voiceCaptureState = .processing
+        state.statusMessage = "Processing…"
+
+        Task {
+            do {
+                let result = try await voiceModeService.stopCaptureAndProcess()
+                await MainActor.run {
+                    state.query = result.finalQuery
+                }
+                await search()
+                await MainActor.run {
+                    voiceCaptureState = .idle
+                    state.statusMessage = nil
+                }
+            } catch {
+                await MainActor.run {
+                    voiceCaptureState = .error(error.localizedDescription)
+                    state.statusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func cancelVoiceCapture() {
+        Task {
+            await voiceModeService.cancelCapture()
+            await MainActor.run {
+                if case .listening = voiceCaptureState {
+                    voiceCaptureState = .idle
+                    state.statusMessage = nil
+                }
+                voiceInputLevel = 0
+            }
+        }
+    }
+
     private func rebuildIndexAndSearch() async {
         isRebuildingIndex = true
         defer { isRebuildingIndex = false }
@@ -265,6 +441,37 @@ final class AppCoordinator: ObservableObject {
                 state.selectedResultID = results.first?.id
             }
         }
+    }
+
+    private func refreshVoiceAvailability() async {
+        let availability = await voiceModeService.capabilityStatus()
+        await MainActor.run {
+            applyVoiceAvailability(availability)
+            if !availability.isVoiceModeSupported {
+                voiceCaptureState = .unavailable("Voice unavailable on this Mac")
+            } else if case .unavailable = voiceCaptureState {
+                voiceCaptureState = .idle
+            }
+        }
+    }
+
+    private func configureVoiceMeteringIfNeeded() {
+        guard !didConfigureVoiceMetering else { return }
+        didConfigureVoiceMetering = true
+
+        Task {
+            await voiceModeService.setLevelHandler { [weak self] level in
+                Task { @MainActor [weak self] in
+                    self?.voiceInputLevel = level
+                }
+            }
+        }
+    }
+
+    private func applyVoiceAvailability(_ availability: VoiceCapabilityStatus) {
+        voiceAvailabilityText = availability.availabilityText
+        voicePermissionText = availability.permissionText
+        shouldShowVoicePermissionShortcut = availability.hasDeniedPermission
     }
 
     private func applyRankingPreferencesAndSearch() async {
@@ -395,6 +602,33 @@ final class AppCoordinator: ObservableObject {
 
     private static func loadIndexedRootBookmarks(from defaults: UserDefaults) -> [String: Data] {
         defaults.dictionary(forKey: "search.indexedRootBookmarks") as? [String: Data] ?? [:]
+    }
+
+    private static func loadVoiceModeEnabled(from defaults: UserDefaults) -> Bool {
+        if defaults.object(forKey: "voice.mode.enabled") == nil {
+            return true
+        }
+        return defaults.bool(forKey: "voice.mode.enabled")
+    }
+
+    private static func loadVoicePushToTalkModifier(from defaults: UserDefaults) -> VoicePushToTalkModifier {
+        guard let raw = defaults.string(forKey: "voice.pushToTalk.modifier"),
+              let modifier = VoicePushToTalkModifier(rawValue: raw) else {
+            return .option
+        }
+        return modifier
+    }
+
+    private static func loadVoiceLocaleIdentifier(from defaults: UserDefaults) -> String {
+        if let stored = defaults.string(forKey: "voice.locale.identifier"),
+           !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
+        }
+        if let preferred = Locale.preferredLanguages.first,
+           !preferred.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return preferred
+        }
+        return "en-US"
     }
 
     private func createSecurityScopedBookmark(for url: URL) -> Data? {

@@ -11,6 +11,7 @@ struct LauncherView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     @FocusState private var isSearchFocused: Bool
     @State private var keyMonitor: Any?
+    @State private var isHoldingPushToTalk = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,12 +29,28 @@ struct LauncherView: View {
                         .strokeBorder(.quaternary, lineWidth: 1)
                 )
         )
+        .overlay(alignment: .bottom) {
+            if shouldShowFloatingVisualizer {
+                FloatingAudioVisualizer(
+                    inputLevel: coordinator.voiceInputLevel,
+                    isListening: coordinator.voiceCaptureState == .listening,
+                    isProcessing: coordinator.voiceCaptureState == .processing
+                )
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: shouldShowFloatingVisualizer)
         .onAppear {
             focusSearchField()
             installKeyMonitor()
         }
         .onDisappear {
             removeKeyMonitor()
+            if isHoldingPushToTalk {
+                isHoldingPushToTalk = false
+                coordinator.cancelVoiceCapture()
+            }
         }
         .onChange(of: coordinator.state.isLauncherVisible) { _, isVisible in
             if isVisible { focusSearchField() }
@@ -50,14 +67,39 @@ struct LauncherView: View {
             Text("Elbert")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
+            voiceStateBadge
             Spacer()
-            Text("↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
+            Text("Hold \(coordinator.voicePushToTalkModifier.hintGlyph) talk · ↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 18)
         .padding(.top, 14)
         .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var voiceStateBadge: some View {
+        switch coordinator.voiceCaptureState {
+        case .idle:
+            EmptyView()
+        case .listening:
+            Label("Listening", systemImage: "mic.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.red)
+        case .processing:
+            Label("Processing", systemImage: "waveform")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        case .unavailable:
+            Label("Voice unavailable", systemImage: "exclamationmark.triangle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        case .error:
+            Label("Voice error", systemImage: "xmark.octagon")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var searchField: some View {
@@ -161,10 +203,24 @@ struct LauncherView: View {
         return coordinator.state.results.first(where: { $0.id == selectedID }) ?? coordinator.state.results.first
     }
 
+    private var shouldShowFloatingVisualizer: Bool {
+        switch coordinator.voiceCaptureState {
+        case .listening, .processing:
+            return true
+        case .idle, .unavailable, .error:
+            return false
+        }
+    }
+
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard coordinator.state.isLauncherVisible else { return event }
+
+            if event.type == .flagsChanged {
+                handlePushToTalkModifierChange(event)
+                return event
+            }
 
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if modifiers == .command {
@@ -201,6 +257,29 @@ struct LauncherView: View {
         }
     }
 
+    private func handlePushToTalkModifierChange(_ event: NSEvent) {
+        let optionOnly = isOptionOnlyModifier(event.modifierFlags)
+
+        if optionOnly, !isHoldingPushToTalk {
+            isHoldingPushToTalk = true
+            coordinator.startVoiceCapture()
+            return
+        }
+
+        if !optionOnly, isHoldingPushToTalk {
+            isHoldingPushToTalk = false
+            coordinator.stopVoiceCaptureAndProcess()
+        }
+    }
+
+    private func isOptionOnlyModifier(_ flags: NSEvent.ModifierFlags) -> Bool {
+        let significant = flags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+
+        return significant == coordinator.voicePushToTalkModifier.eventFlag
+    }
+
     private func removeKeyMonitor() {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
@@ -227,6 +306,62 @@ struct LauncherView: View {
         DispatchQueue.main.async {
             isSearchFocused = true
         }
+    }
+}
+
+private struct FloatingAudioVisualizer: View {
+    let inputLevel: Double
+    let isListening: Bool
+    let isProcessing: Bool
+
+    private let totalHeight: CGFloat = 24
+    private let barWidth: CGFloat = 5
+    private let barCount = 7
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !(isListening || isProcessing))) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    bar(heightFraction: barHeightFraction(index: index, time: t))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
+        }
+    }
+
+    private func bar(heightFraction: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 2.2, style: .continuous)
+            .fill(.black.gradient)
+            .frame(width: barWidth, height: heightFraction * totalHeight)
+            .frame(height: totalHeight, alignment: .bottom)
+    }
+
+    private func barHeightFraction(index: Int, time: TimeInterval) -> CGFloat {
+        let level = min(max(inputLevel, 0), 1)
+        let wave = 0.5 + 0.5 * sin((time * 6.2) + (Double(index) * 1.12))
+        let pulse = 0.5 + 0.5 * sin((time * 3.1) + (Double(index) * 0.63))
+
+        if isListening {
+            let energy = 0.18 + (level * 0.82)
+            let floor = 0.10 + (Double(index % 2) * 0.03)
+            let dynamic = floor + (wave * energy)
+            return CGFloat(min(max(dynamic, 0.08), 1.0))
+        }
+
+        if isProcessing {
+            let dynamic = 0.22 + (pulse * 0.44)
+            return CGFloat(min(max(dynamic, 0.12), 0.88))
+        }
+
+        return 0.08
     }
 }
 

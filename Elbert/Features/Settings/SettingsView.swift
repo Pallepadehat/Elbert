@@ -138,7 +138,7 @@ struct SettingsView: View {
 
                         settingsRow("Push-to-talk key", subtitle: "Which modifier key starts voice capture") {
                             Picker(
-                                "Push-to-talk key",
+                                "",
                                 selection: Binding(
                                     get: { coordinator.voicePushToTalkModifier },
                                     set: { coordinator.setVoicePushToTalkModifier($0) }
@@ -153,7 +153,7 @@ struct SettingsView: View {
 
                         settingsRow("Voice language", subtitle: "Speech recognizer locale (fixes Assistant fallback)") {
                             Picker(
-                                "Voice language",
+                                "",
                                 selection: Binding(
                                     get: { coordinator.voiceLocaleIdentifier },
                                     set: { coordinator.setVoiceLocaleIdentifier($0) }
@@ -207,7 +207,7 @@ struct SettingsView: View {
                 .padding(16)
             }
         }
-        .frame(width: 420, height: 480)
+        .frame(width: 500, height: 480)
         .background(backgroundView)
     }
 

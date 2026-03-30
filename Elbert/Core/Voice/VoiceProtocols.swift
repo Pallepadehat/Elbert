@@ -6,6 +6,7 @@
 import Foundation
 
 protocol SpeechCapturing: Sendable {
+    func updateLocaleIdentifier(_ identifier: String) async
     func startCapture() async throws
     func stopCapture() async throws -> SpeechCaptureOutput
     func cancelCapture() async
@@ -16,6 +17,7 @@ protocol TranscriptRefining: Sendable {
 }
 
 protocol VoiceCapabilityChecking: Sendable {
+    func updateLocaleIdentifier(_ identifier: String) async
     func capabilityStatus() async -> VoiceCapabilityStatus
     func requestAuthorizationsIfNeeded() async -> VoiceAuthorizationSnapshot
 }

@@ -35,6 +35,11 @@ actor VoiceModeService {
         await capabilityChecker.capabilityStatus()
     }
 
+    func updateLocaleIdentifier(_ identifier: String) async {
+        await capabilityChecker.updateLocaleIdentifier(identifier)
+        await speechCapturer.updateLocaleIdentifier(identifier)
+    }
+
     func prepareForCapture() async -> VoiceCapabilityStatus {
         _ = await capabilityChecker.requestAuthorizationsIfNeeded()
         return await capabilityChecker.capabilityStatus()

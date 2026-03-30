@@ -31,6 +31,8 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var isBackgroundRefreshingIndex = false
     @Published private(set) var voiceCaptureState: VoiceCaptureState = .idle
     @Published private(set) var isVoiceModeEnabled: Bool
+    @Published private(set) var voicePushToTalkModifier: VoicePushToTalkModifier
+    @Published private(set) var voiceLocaleIdentifier: String
     @Published private(set) var voiceAvailabilityText: String = "Checking…"
     @Published private(set) var voicePermissionText: String = "Checking…"
     @Published private(set) var shouldShowVoicePermissionShortcut = false
@@ -53,6 +55,8 @@ final class AppCoordinator: ObservableObject {
     private let indexedRootBookmarksKey = "search.indexedRootBookmarks"
     private let resultPriorityOrderKey = "search.priority.order"
     private let voiceModeEnabledKey = "voice.mode.enabled"
+    private let voicePushToTalkModifierKey = "voice.pushToTalk.modifier"
+    private let voiceLocaleIdentifierKey = "voice.locale.identifier"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -61,8 +65,12 @@ final class AppCoordinator: ObservableObject {
         self.hotkeyManager = HotkeyManager()
         self.searchIndex = SearchIndex()
         self.actionExecutor = ActionExecutor()
-        let voiceCapabilityChecker = VoiceAvailabilityService()
-        let speechCapturer = SpeechCaptureService()
+        let voicePushToTalkModifier = AppCoordinator.loadVoicePushToTalkModifier(from: defaults)
+        let voiceLocaleIdentifier = AppCoordinator.loadVoiceLocaleIdentifier(from: defaults)
+        self.voicePushToTalkModifier = voicePushToTalkModifier
+        self.voiceLocaleIdentifier = voiceLocaleIdentifier
+        let voiceCapabilityChecker = VoiceAvailabilityService(localeIdentifier: voiceLocaleIdentifier)
+        let speechCapturer = SpeechCaptureService(localeIdentifier: voiceLocaleIdentifier)
         let transcriptRefiner = TranscriptRefinementService(capabilityChecker: voiceCapabilityChecker)
         self.voiceModeService = VoiceModeService(
             speechCapturer: speechCapturer,
@@ -265,6 +273,43 @@ final class AppCoordinator: ObservableObject {
             voiceCaptureState = .idle
             state.statusMessage = nil
         }
+    }
+
+    func setVoicePushToTalkModifier(_ modifier: VoicePushToTalkModifier) {
+        voicePushToTalkModifier = modifier
+        defaults.set(modifier.rawValue, forKey: voicePushToTalkModifierKey)
+    }
+
+    func setVoiceLocaleIdentifier(_ identifier: String) {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        voiceLocaleIdentifier = trimmed
+        defaults.set(trimmed, forKey: voiceLocaleIdentifierKey)
+
+        Task {
+            await voiceModeService.updateLocaleIdentifier(trimmed)
+            await refreshVoiceAvailability()
+        }
+    }
+
+    var voiceLocaleOptions: [String] {
+        let seed = [
+            voiceLocaleIdentifier,
+            Locale.current.identifier,
+            "en-US",
+            "da-DK",
+            "en-GB",
+            "de-DE",
+            "fr-FR",
+            "es-ES"
+        ]
+
+        var seen = Set<String>()
+        return seed
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
     }
 
     func refreshVoiceAvailabilityFromSettings() {
@@ -546,6 +591,26 @@ final class AppCoordinator: ObservableObject {
             return true
         }
         return defaults.bool(forKey: "voice.mode.enabled")
+    }
+
+    private static func loadVoicePushToTalkModifier(from defaults: UserDefaults) -> VoicePushToTalkModifier {
+        guard let raw = defaults.string(forKey: "voice.pushToTalk.modifier"),
+              let modifier = VoicePushToTalkModifier(rawValue: raw) else {
+            return .option
+        }
+        return modifier
+    }
+
+    private static func loadVoiceLocaleIdentifier(from defaults: UserDefaults) -> String {
+        if let stored = defaults.string(forKey: "voice.locale.identifier"),
+           !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
+        }
+        if let preferred = Locale.preferredLanguages.first,
+           !preferred.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return preferred
+        }
+        return "en-US"
     }
 
     private func createSecurityScopedBookmark(for url: URL) -> Data? {

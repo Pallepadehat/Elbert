@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import AppKit
 
 enum VoiceCaptureState: Equatable {
     case idle
@@ -80,4 +81,40 @@ struct VoiceProcessingResult: Sendable {
     let finalQuery: String
     let rawTranscript: String
     let confidence: Double?
+}
+
+enum VoicePushToTalkModifier: String, CaseIterable, Codable, Identifiable {
+    case option
+    case control
+    case shift
+    case command
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .option: "Option (⌥)"
+        case .control: "Control (⌃)"
+        case .shift: "Shift (⇧)"
+        case .command: "Command (⌘)"
+        }
+    }
+
+    var hintGlyph: String {
+        switch self {
+        case .option: "⌥"
+        case .control: "⌃"
+        case .shift: "⇧"
+        case .command: "⌘"
+        }
+    }
+
+    var eventFlag: NSEvent.ModifierFlags {
+        switch self {
+        case .option: .option
+        case .control: .control
+        case .shift: .shift
+        case .command: .command
+        }
+    }
 }

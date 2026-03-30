@@ -124,7 +124,7 @@ struct SettingsView: View {
                     }
 
                     SettingsSection("Voice") {
-                        settingsRow("Voice mode", subtitle: "Hold Option in launcher to push-to-talk") {
+                        settingsRow("Voice mode", subtitle: "Hold \(coordinator.voicePushToTalkModifier.title) in launcher to push-to-talk") {
                             Toggle(
                                 "Enable",
                                 isOn: Binding(
@@ -134,6 +134,36 @@ struct SettingsView: View {
                             )
                             .labelsHidden()
                             .toggleStyle(.switch)
+                        }
+
+                        settingsRow("Push-to-talk key", subtitle: "Which modifier key starts voice capture") {
+                            Picker(
+                                "Push-to-talk key",
+                                selection: Binding(
+                                    get: { coordinator.voicePushToTalkModifier },
+                                    set: { coordinator.setVoicePushToTalkModifier($0) }
+                                )
+                            ) {
+                                ForEach(VoicePushToTalkModifier.allCases) { modifier in
+                                    Text(modifier.title).tag(modifier)
+                                }
+                            }
+                            .frame(width: 150)
+                        }
+
+                        settingsRow("Voice language", subtitle: "Speech recognizer locale (fixes Assistant fallback)") {
+                            Picker(
+                                "Voice language",
+                                selection: Binding(
+                                    get: { coordinator.voiceLocaleIdentifier },
+                                    set: { coordinator.setVoiceLocaleIdentifier($0) }
+                                )
+                            ) {
+                                ForEach(coordinator.voiceLocaleOptions, id: \.self) { localeID in
+                                    Text(localeLabel(for: localeID)).tag(localeID)
+                                }
+                            }
+                            .frame(width: 150)
                         }
 
                         settingsRow("Availability", subtitle: coordinator.voiceAvailabilityText) {
@@ -241,6 +271,14 @@ struct SettingsView: View {
             trailing()
         }
         .padding(.vertical, 2)
+    }
+
+    private func localeLabel(for identifier: String) -> String {
+        let locale = Locale(identifier: identifier)
+        if let title = locale.localizedString(forIdentifier: identifier) {
+            return title
+        }
+        return identifier
     }
 }
 

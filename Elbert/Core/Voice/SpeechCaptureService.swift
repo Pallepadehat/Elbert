@@ -38,7 +38,7 @@ enum SpeechCaptureError: Error, LocalizedError {
 
 actor SpeechCaptureService: SpeechCapturing {
     private let audioEngine = AVAudioEngine()
-    private let locale: Locale
+    private var localeIdentifier: String
 
     private var recognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
@@ -48,13 +48,20 @@ actor SpeechCaptureService: SpeechCapturing {
     private var captureError: Error?
     private var isCapturing = false
 
-    init(locale: Locale = .current) {
-        self.locale = locale
+    init(localeIdentifier: String = Locale.current.identifier) {
+        self.localeIdentifier = localeIdentifier
+    }
+
+    func updateLocaleIdentifier(_ identifier: String) async {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        localeIdentifier = trimmed
     }
 
     func startCapture() async throws {
         guard !isCapturing else { throw SpeechCaptureError.captureAlreadyRunning }
 
+        let locale = Locale(identifier: localeIdentifier)
         guard let recognizer = SFSpeechRecognizer(locale: locale) else {
             throw SpeechCaptureError.recognizerUnavailableForLocale
         }

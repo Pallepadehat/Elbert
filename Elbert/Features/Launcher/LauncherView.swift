@@ -57,7 +57,7 @@ struct LauncherView: View {
                 .foregroundStyle(.secondary)
             voiceStateBadge
             Spacer()
-            Text("Hold ⌥ talk · ↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
+            Text("Hold \(coordinator.voicePushToTalkModifier.hintGlyph) talk · ↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -256,8 +256,7 @@ struct LauncherView: View {
             .intersection(.deviceIndependentFlagsMask)
             .subtracting([.capsLock, .numericPad, .function])
 
-        let optionOnly: NSEvent.ModifierFlags = [.option]
-        return significant == optionOnly
+        return significant == coordinator.voicePushToTalkModifier.eventFlag
     }
 
     private func removeKeyMonitor() {

@@ -8,14 +8,26 @@ import Speech
 import AVFoundation
 import FoundationModels
 
-struct VoiceAvailabilityService: VoiceCapabilityChecking {
+actor VoiceAvailabilityService: VoiceCapabilityChecking {
+    private var localeIdentifier: String
+
+    init(localeIdentifier: String = Locale.current.identifier) {
+        self.localeIdentifier = localeIdentifier
+    }
+
+    func updateLocaleIdentifier(_ identifier: String) async {
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        localeIdentifier = trimmed
+    }
+
     func capabilityStatus() async -> VoiceCapabilityStatus {
         let authorization = await currentAuthorizations()
         let model = SystemLanguageModel.default
         let modelAvailability = model.availability
         let modelIsAvailable = model.isAvailable
 
-        let recognizer = SFSpeechRecognizer(locale: .current)
+        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier))
         let speechOnDevice = recognizer?.supportsOnDeviceRecognition ?? false
 
         return VoiceCapabilityStatus(
@@ -57,7 +69,7 @@ struct VoiceAvailabilityService: VoiceCapabilityChecking {
     private func requestSpeechAuthorization() async -> VoiceAuthorizationStatus {
         await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: mapSpeechStatus(status))
+                continuation.resume(returning: self.mapSpeechStatus(status))
             }
         }
     }

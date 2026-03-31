@@ -222,8 +222,9 @@ actor SearchIndex {
             }
         }
 
-        let launchServicesURLs = NSWorkspace.shared.runningApplications.compactMap { app in
-            app.bundleURL
+        let launchServicesURLs = NSWorkspace.shared.runningApplications.compactMap { app -> URL? in
+            guard app.activationPolicy == .regular else { return nil }
+            return app.bundleURL
         }
         for appURL in launchServicesURLs where appURL.pathExtension.lowercased() == "app" {
             guard shouldIndexApplication(at: appURL) else { continue }
@@ -272,8 +273,8 @@ actor SearchIndex {
         }
 
         let name = url.deletingPathExtension().lastPathComponent.lowercased()
-        let helperSuffixes = [" helper", " agent", " launcher", " updater", "daemon"]
-        if helperSuffixes.contains(where: { name.hasSuffix($0) }) {
+        let helperMarkers = ["helper", "agent", "launcher", "updater", "daemon", "loginitem"]
+        if helperMarkers.contains(where: { name.contains($0) }) {
             return false
         }
 

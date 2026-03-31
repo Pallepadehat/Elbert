@@ -199,7 +199,6 @@ actor SearchIndex {
             URL(fileURLWithPath: "/System/Applications", isDirectory: true),
             URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
             URL(fileURLWithPath: "/System/Library/CoreServices/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/System/Library/CoreServices", isDirectory: true),
             fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
         ]
 
@@ -208,11 +207,16 @@ actor SearchIndex {
             let enumerator = fm.enumerator(
                 at: baseURL,
                 includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsPackageDescendants]
+                options: []
             )
 
             while let item = enumerator?.nextObject() as? URL {
+                if item.pathExtension.lowercased() == "app" {
+                    enumerator?.skipDescendants()
+                }
+
                 guard item.pathExtension.lowercased() == "app" else { continue }
+                guard shouldIndexApplication(at: item) else { continue }
                 let name = item.deletingPathExtension().lastPathComponent
                 items.append(IndexedApp(name: name, url: item))
             }
@@ -222,6 +226,7 @@ actor SearchIndex {
             app.bundleURL
         }
         for appURL in launchServicesURLs where appURL.pathExtension.lowercased() == "app" {
+            guard shouldIndexApplication(at: appURL) else { continue }
             let name = appURL.deletingPathExtension().lastPathComponent
             items.append(IndexedApp(name: name, url: appURL))
         }
@@ -257,6 +262,22 @@ actor SearchIndex {
         let url = app.url.standardizedFileURL
         let bundleID = Bundle(url: url)?.bundleIdentifier ?? ""
         return "\(bundleID)|\(app.name.lowercased())|\(url.path.lowercased())"
+    }
+
+    private func shouldIndexApplication(at url: URL) -> Bool {
+        let path = url.path.lowercased()
+        if path.contains("/contents/library/loginitems/") { return false }
+        if path.contains("/library/coreservices/") && !path.contains("/library/coreservices/applications/") {
+            return false
+        }
+
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        let helperSuffixes = [" helper", " agent", " launcher", " updater", "daemon"]
+        if helperSuffixes.contains(where: { name.hasSuffix($0) }) {
+            return false
+        }
+
+        return true
     }
 
     private static let knownSystemBundleIDs: [String] = [

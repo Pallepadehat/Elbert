@@ -80,7 +80,7 @@ final class HotkeyManager {
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: mask,
             callback: callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
@@ -137,6 +137,7 @@ final class HotkeyManager {
         let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) == 1
         if !isAutorepeat && !frontmostAppOwnsShortcut(shortcut) {
             onHotkeyPressed?()
+            return nil
         }
 
         return Unmanaged.passUnretained(event)

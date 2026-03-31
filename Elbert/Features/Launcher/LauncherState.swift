@@ -11,6 +11,7 @@ final class LauncherState: ObservableObject {
     @Published var query: String = ""
     @Published var results: [SearchResultItem] = []
     @Published var selectedResultID: SearchResultItem.ID?
+    @Published var isClipboardMode = false
     @Published var isLauncherVisible = false
     @Published var statusMessage: String?
     @Published var isOnboardingComplete: Bool

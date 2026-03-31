@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import Carbon
 
 struct HotKeyRecorder: View {
     let current: HotkeyShortcut
@@ -78,7 +77,7 @@ struct HotKeyRecorder: View {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard isRecording else { return event }
 
-            if Int(event.keyCode) == kVK_Escape {
+            if Int(event.keyCode) == KeyboardKeyCode.escape {
                 isRecording = false
                 return nil
             }

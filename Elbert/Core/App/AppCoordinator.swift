@@ -6,9 +6,21 @@
 import Foundation
 import Combine
 import AppKit
+import ApplicationServices
 
 @MainActor
 final class AppCoordinator: ObservableObject {
+    private enum CoordinatorError: LocalizedError {
+        case pasteAutomationUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .pasteAutomationUnavailable:
+                return "Could not send Cmd+V to the previous app."
+            }
+        }
+    }
+
     enum ResultPrioritySource: String, CaseIterable, Identifiable {
         case app
         case file
@@ -43,6 +55,7 @@ final class AppCoordinator: ObservableObject {
     private let hotkeyManager: HotkeyManager
     private let searchIndex: SearchIndex
     private let actionExecutor: ActionExecutor
+    private let clipboardHistoryStore: ClipboardHistoryStore
     private let voiceModeService: VoiceModeService
     private let defaults: UserDefaults
 
@@ -52,6 +65,7 @@ final class AppCoordinator: ObservableObject {
     private var didConfigureVoiceMetering = false
     private var cancellables = Set<AnyCancellable>()
     private var backgroundRefreshTask: Task<Void, Never>?
+    private var previousFrontmostApplication: NSRunningApplication?
     private var indexedRootBookmarks: [String: Data]
     private var activeSecurityScopedRoots: [String: URL] = [:]
     private let indexedRootPathsKey = "search.indexedRootPaths"
@@ -69,6 +83,7 @@ final class AppCoordinator: ObservableObject {
         self.hotkeyManager = HotkeyManager()
         self.searchIndex = SearchIndex()
         self.actionExecutor = ActionExecutor()
+        self.clipboardHistoryStore = ClipboardHistoryStore(defaults: defaults, maxEntries: 200)
         let voicePushToTalkModifier = AppCoordinator.loadVoicePushToTalkModifier(from: defaults)
         let voiceLocaleIdentifier = AppCoordinator.loadVoiceLocaleIdentifier(from: defaults)
         self.voicePushToTalkModifier = voicePushToTalkModifier
@@ -112,6 +127,7 @@ final class AppCoordinator: ObservableObject {
 
         Task {
             configureVoiceMeteringIfNeeded()
+            clipboardHistoryStore.startMonitoring()
             await rebuildIndexAndSearch()
             registerCurrentShortcut()
             await refreshVoiceAvailability()
@@ -124,7 +140,14 @@ final class AppCoordinator: ObservableObject {
         if launcherWindowController.isVisible {
             dismissLauncher()
         } else {
+            let frontmost = NSWorkspace.shared.frontmostApplication
+            if frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+                previousFrontmostApplication = nil
+            } else {
+                previousFrontmostApplication = frontmost
+            }
             state.query = ""
+            state.isClipboardMode = false
             state.statusMessage = nil
             Task { await search() }
             launcherWindowController.show()
@@ -135,6 +158,7 @@ final class AppCoordinator: ObservableObject {
     func dismissLauncher() {
         cancelVoiceCapture()
         launcherWindowController?.hide()
+        state.isClipboardMode = false
         state.isLauncherVisible = false
     }
 
@@ -154,10 +178,36 @@ final class AppCoordinator: ObservableObject {
     func run(result: SearchResultItem) {
         Task {
             do {
-                try await actionExecutor.execute(result.action)
+                switch result.action {
+                case .pasteClipboardEntry(let value):
+                    try await runClipboardPasteAction(value)
+                default:
+                    try await actionExecutor.execute(result.action)
+                }
                 await MainActor.run {
                     state.statusMessage = nil
                     launcherWindowController?.hide()
+                    state.isClipboardMode = false
+                    state.isLauncherVisible = false
+                }
+            } catch {
+                await MainActor.run {
+                    state.statusMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func copySelectedValueAndClose(for result: SearchResultItem) {
+        guard let value = primaryCopyValue(for: result) else { return }
+
+        Task {
+            do {
+                try await actionExecutor.execute(.copyToClipboard(value))
+                await MainActor.run {
+                    state.statusMessage = nil
+                    launcherWindowController?.hide()
+                    state.isClipboardMode = false
                     state.isLauncherVisible = false
                 }
             } catch {
@@ -247,6 +297,25 @@ final class AppCoordinator: ObservableObject {
                     state.statusMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private func primaryCopyValue(for result: SearchResultItem) -> String? {
+        switch result.action {
+        case .openApplication:
+            return result.title
+        case .openFile(let url):
+            return url.path
+        case .revealInFinder(let url):
+            return url.path
+        case .openURL(let url):
+            return url.absoluteString
+        case .runShellCommand(let command):
+            return command
+        case .copyToClipboard(let value):
+            return value
+        case .pasteClipboardEntry(let value):
+            return value
         }
     }
 
@@ -443,9 +512,17 @@ final class AppCoordinator: ObservableObject {
     }
 
     private func search() async {
-        let results = await searchIndex.search(query: state.query)
+        let clipboardQuery = parseClipboardQuery(state.query)
+        let results: [SearchResultItem]
+        if let clipboardQuery {
+            results = clipboardResults(for: clipboardQuery)
+        } else {
+            results = await searchIndex.search(query: state.query)
+        }
+
         await MainActor.run {
             state.results = results
+            state.isClipboardMode = clipboardQuery != nil
             if state.selectedResultID == nil || !results.contains(where: { $0.id == state.selectedResultID }) {
                 state.selectedResultID = results.first?.id
             }
@@ -462,6 +539,99 @@ final class AppCoordinator: ObservableObject {
                 voiceCaptureState = .idle
             }
         }
+    }
+
+    private func runClipboardPasteAction(_ value: String) async throws {
+        try await actionExecutor.execute(.copyToClipboard(value))
+
+        guard let app = previousFrontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return
+        }
+
+        app.activate()
+        try? await Task.sleep(for: .milliseconds(120))
+        try postCommandVKeystroke()
+    }
+
+    private func postCommandVKeystroke() throws {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
+            throw HotkeyRegistrationError.accessibilityPermissionRequired
+        }
+
+        guard let source = CGEventSource(stateID: .combinedSessionState),
+              let keyDown = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(KeyboardKeyCode.v), keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(KeyboardKeyCode.v), keyDown: false) else {
+            throw CoordinatorError.pasteAutomationUnavailable
+        }
+
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    private func parseClipboardQuery(_ query: String) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let parts = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        guard let rawCommand = parts.first else {
+            return nil
+        }
+
+        let command = rawCommand
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+
+        let isClipboardCommand =
+            command == "clipboard" ||
+            command == "cliboard" ||
+            command == "clip" ||
+            command.hasPrefix("clip")
+
+        guard isClipboardCommand else {
+            return nil
+        }
+
+        if parts.count > 1 {
+            return String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
+    }
+
+    private func clipboardResults(for query: String) -> [SearchResultItem] {
+        let entries = clipboardHistoryStore.search(query)
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+
+        return entries.enumerated().map { index, entry in
+            let preview = previewTitle(for: entry.text)
+            let relative = formatter.localizedString(for: entry.createdAt, relativeTo: Date())
+
+            return SearchResultItem(
+                title: preview,
+                subtitle: "Copied \(relative)",
+                source: "Clipboard",
+                score: 8_000 - index,
+                action: .pasteClipboardEntry(entry.text)
+            )
+        }
+    }
+
+    private func previewTitle(for clipboardText: String) -> String {
+        let firstLine = clipboardText
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? clipboardText
+
+        let trimmed = firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Clipboard item" }
+        if trimmed.count <= 100 {
+            return trimmed
+        }
+        return String(trimmed.prefix(97)) + "..."
     }
 
     private func configureVoiceMeteringIfNeeded() {

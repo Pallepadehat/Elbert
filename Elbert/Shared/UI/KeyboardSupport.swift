@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import Carbon
 
 private struct EscapeKeyHandler: ViewModifier {
     let isEnabled: Bool
@@ -14,7 +13,7 @@ private struct EscapeKeyHandler: ViewModifier {
                 guard monitor == nil else { return }
                 monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
                     guard isEnabled else { return event }
-                    guard Int(event.keyCode) == kVK_Escape else { return event }
+                    guard Int(event.keyCode) == KeyboardKeyCode.escape else { return event }
                     perform()
                     return nil
                 }

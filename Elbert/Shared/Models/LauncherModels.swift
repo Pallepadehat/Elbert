@@ -4,20 +4,34 @@
 //
 
 import Foundation
-import Carbon
 import AppKit
 
 struct HotkeyShortcut: Codable, Hashable {
     let keyCode: UInt32
-    let carbonModifiers: UInt32
+    let modifierFlagsRawValue: UInt64
+
+    private static let persistedModifierMask: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
 
     static let `default` = HotkeyShortcut(
-        keyCode: UInt32(kVK_Space),
-        carbonModifiers: UInt32(cmdKey | shiftKey)
+        keyCode: UInt32(KeyboardKeyCode.space),
+        modifiers: [.command, .shift]
     )
 
+    init(keyCode: UInt32, modifiers: NSEvent.ModifierFlags) {
+        self.keyCode = keyCode
+        let normalized = modifiers
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(Self.persistedModifierMask)
+        self.modifierFlagsRawValue = UInt64(normalized.rawValue)
+    }
+
+    var modifiers: NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: UInt(modifierFlagsRawValue))
+            .intersection(Self.persistedModifierMask)
+    }
+
     var isValid: Bool {
-        carbonModifiers != 0
+        !modifiers.isEmpty
     }
 
     var displayString: String {
@@ -27,70 +41,103 @@ struct HotkeyShortcut: Codable, Hashable {
 
     private var modifierGlyphs: String {
         var output = ""
-        if carbonModifiers & UInt32(cmdKey) != 0 { output += "⌘" }
-        if carbonModifiers & UInt32(optionKey) != 0 { output += "⌥" }
-        if carbonModifiers & UInt32(controlKey) != 0 { output += "⌃" }
-        if carbonModifiers & UInt32(shiftKey) != 0 { output += "⇧" }
+        if modifiers.contains(.command) { output += "⌘" }
+        if modifiers.contains(.option) { output += "⌥" }
+        if modifiers.contains(.control) { output += "⌃" }
+        if modifiers.contains(.shift) { output += "⇧" }
         return output
     }
 
     private var keyGlyph: String {
-        switch Int(keyCode) {
-        case kVK_Return: return "↩"
-        case kVK_Tab: return "⇥"
-        case kVK_Space: return "Space"
-        case kVK_Delete: return "⌫"
-        case kVK_Escape: return "⎋"
-        case kVK_ANSI_A: return "A"
-        case kVK_ANSI_B: return "B"
-        case kVK_ANSI_C: return "C"
-        case kVK_ANSI_D: return "D"
-        case kVK_ANSI_E: return "E"
-        case kVK_ANSI_F: return "F"
-        case kVK_ANSI_G: return "G"
-        case kVK_ANSI_H: return "H"
-        case kVK_ANSI_I: return "I"
-        case kVK_ANSI_J: return "J"
-        case kVK_ANSI_K: return "K"
-        case kVK_ANSI_L: return "L"
-        case kVK_ANSI_M: return "M"
-        case kVK_ANSI_N: return "N"
-        case kVK_ANSI_O: return "O"
-        case kVK_ANSI_P: return "P"
-        case kVK_ANSI_Q: return "Q"
-        case kVK_ANSI_R: return "R"
-        case kVK_ANSI_S: return "S"
-        case kVK_ANSI_T: return "T"
-        case kVK_ANSI_U: return "U"
-        case kVK_ANSI_V: return "V"
-        case kVK_ANSI_W: return "W"
-        case kVK_ANSI_X: return "X"
-        case kVK_ANSI_Y: return "Y"
-        case kVK_ANSI_Z: return "Z"
-        case kVK_ANSI_0: return "0"
-        case kVK_ANSI_1: return "1"
-        case kVK_ANSI_2: return "2"
-        case kVK_ANSI_3: return "3"
-        case kVK_ANSI_4: return "4"
-        case kVK_ANSI_5: return "5"
-        case kVK_ANSI_6: return "6"
-        case kVK_ANSI_7: return "7"
-        case kVK_ANSI_8: return "8"
-        case kVK_ANSI_9: return "9"
-        default: return "Key \(keyCode)"
-        }
+        HotkeyShortcut.glyphsByKeyCode[Int(keyCode)] ?? "Key \(keyCode)"
     }
 
     static func from(event: NSEvent) -> HotkeyShortcut? {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        var carbon: UInt32 = 0
-        if modifiers.contains(.command) { carbon |= UInt32(cmdKey) }
-        if modifiers.contains(.option) { carbon |= UInt32(optionKey) }
-        if modifiers.contains(.control) { carbon |= UInt32(controlKey) }
-        if modifiers.contains(.shift) { carbon |= UInt32(shiftKey) }
-        let shortcut = HotkeyShortcut(keyCode: UInt32(event.keyCode), carbonModifiers: carbon)
+        let modifiers = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(persistedModifierMask)
+
+        let shortcut = HotkeyShortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers)
         return shortcut.isValid ? shortcut : nil
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case keyCode
+        case modifierFlagsRawValue
+        case carbonModifiers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let keyCode = try container.decode(UInt32.self, forKey: .keyCode)
+
+        if let raw = try container.decodeIfPresent(UInt64.self, forKey: .modifierFlagsRawValue) {
+            self.init(keyCode: keyCode, modifiers: NSEvent.ModifierFlags(rawValue: UInt(raw)))
+            return
+        }
+
+        let carbonModifiers = try container.decodeIfPresent(UInt32.self, forKey: .carbonModifiers) ?? 0
+        self.init(keyCode: keyCode, modifiers: Self.modifierFlagsFromCarbon(carbonModifiers))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(keyCode, forKey: .keyCode)
+        try container.encode(modifierFlagsRawValue, forKey: .modifierFlagsRawValue)
+    }
+
+    private static func modifierFlagsFromCarbon(_ carbon: UInt32) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if carbon & 256 != 0 { flags.insert(.command) }
+        if carbon & 2048 != 0 { flags.insert(.option) }
+        if carbon & 4096 != 0 { flags.insert(.control) }
+        if carbon & 512 != 0 { flags.insert(.shift) }
+        return flags
+    }
+
+    private static let glyphsByKeyCode: [Int: String] = [
+        KeyboardKeyCode.return: "↩",
+        KeyboardKeyCode.tab: "⇥",
+        KeyboardKeyCode.space: "Space",
+        KeyboardKeyCode.delete: "⌫",
+        KeyboardKeyCode.escape: "⎋",
+        KeyboardKeyCode.a: "A",
+        KeyboardKeyCode.b: "B",
+        KeyboardKeyCode.c: "C",
+        KeyboardKeyCode.d: "D",
+        KeyboardKeyCode.e: "E",
+        KeyboardKeyCode.f: "F",
+        KeyboardKeyCode.g: "G",
+        KeyboardKeyCode.h: "H",
+        KeyboardKeyCode.i: "I",
+        KeyboardKeyCode.j: "J",
+        KeyboardKeyCode.k: "K",
+        KeyboardKeyCode.l: "L",
+        KeyboardKeyCode.m: "M",
+        KeyboardKeyCode.n: "N",
+        KeyboardKeyCode.o: "O",
+        KeyboardKeyCode.p: "P",
+        KeyboardKeyCode.q: "Q",
+        KeyboardKeyCode.r: "R",
+        KeyboardKeyCode.s: "S",
+        KeyboardKeyCode.t: "T",
+        KeyboardKeyCode.u: "U",
+        KeyboardKeyCode.v: "V",
+        KeyboardKeyCode.w: "W",
+        KeyboardKeyCode.x: "X",
+        KeyboardKeyCode.y: "Y",
+        KeyboardKeyCode.z: "Z",
+        KeyboardKeyCode.zero: "0",
+        KeyboardKeyCode.one: "1",
+        KeyboardKeyCode.two: "2",
+        KeyboardKeyCode.three: "3",
+        KeyboardKeyCode.four: "4",
+        KeyboardKeyCode.five: "5",
+        KeyboardKeyCode.six: "6",
+        KeyboardKeyCode.seven: "7",
+        KeyboardKeyCode.eight: "8",
+        KeyboardKeyCode.nine: "9"
+    ]
 }
 
 enum LauncherAction: Hashable, Sendable {
@@ -100,6 +147,7 @@ enum LauncherAction: Hashable, Sendable {
     case openURL(URL)
     case runShellCommand(String)
     case copyToClipboard(String)
+    case pasteClipboardEntry(String)
 }
 
 struct SearchResultItem: Identifiable, Hashable, Sendable {

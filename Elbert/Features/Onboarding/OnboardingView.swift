@@ -136,7 +136,7 @@ struct OnboardingView: View {
     private var subtitleText: String {
         switch step {
         case .welcome: "A clean launcher built for speed. Find, run, and move."
-        case .hotkey:  "Pick a shortcut you can trigger from anywhere."
+        case .hotkey:  "Pick a shortcut you can trigger from anywhere. You may be asked for Accessibility permission."
         case .finish:  "You're ready to launch apps and indexed files instantly."
         }
     }

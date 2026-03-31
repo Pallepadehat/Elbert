@@ -55,6 +55,10 @@ actor ActionExecutor {
             await MainActor.run {
                 copyToClipboard(value)
             }
+        case .pasteClipboardEntry(let value):
+            await MainActor.run {
+                copyToClipboard(value)
+            }
         }
     }
 

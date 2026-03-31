@@ -19,7 +19,7 @@ struct SettingsView: View {
                             current: coordinator.hotkeyShortcut,
                             onRecord: { coordinator.updateShortcut($0) }
                         )
-                        Text("Click to start recording. Press Esc to cancel.")
+                        Text("Click to start recording. Press Esc to cancel. Accessibility permission is required for global shortcuts in every app.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

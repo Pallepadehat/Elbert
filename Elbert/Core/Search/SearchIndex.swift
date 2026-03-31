@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import AppKit
 
 actor SearchIndex {
     private static let ignoredDirectoryNames: Set<String> = [
@@ -192,17 +193,22 @@ actor SearchIndex {
 
     private func indexApplications() -> [IndexedApp] {
         let fm = FileManager.default
-        let urls = [
+        let directoryURLs = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
+            URL(fileURLWithPath: "/System/Library/CoreServices/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Library/CoreServices", isDirectory: true),
             fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
         ]
 
         var items: [IndexedApp] = []
-        for baseURL in urls where fm.fileExists(atPath: baseURL.path) {
+        for baseURL in directoryURLs where fm.fileExists(atPath: baseURL.path) {
             let enumerator = fm.enumerator(
                 at: baseURL,
                 includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                options: [.skipsPackageDescendants]
             )
 
             while let item = enumerator?.nextObject() as? URL {
@@ -212,10 +218,55 @@ actor SearchIndex {
             }
         }
 
-        let deduplicated = Dictionary(grouping: items, by: \.name)
-            .compactMap { $0.value.first }
-        return deduplicated.sorted { $0.name < $1.name }
+        let launchServicesURLs = NSWorkspace.shared.runningApplications.compactMap { app in
+            app.bundleURL
+        }
+        for appURL in launchServicesURLs where appURL.pathExtension.lowercased() == "app" {
+            let name = appURL.deletingPathExtension().lastPathComponent
+            items.append(IndexedApp(name: name, url: appURL))
+        }
+
+        // Ensure core system apps are discoverable even when folder scans vary across macOS setups.
+        for bundleID in Self.knownSystemBundleIDs {
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+               url.pathExtension.lowercased() == "app" {
+                let name = Bundle(url: url)?
+                    .object(forInfoDictionaryKey: kCFBundleNameKey as String) as? String
+                    ?? url.deletingPathExtension().lastPathComponent
+                items.append(IndexedApp(name: name, url: url))
+            }
+        }
+
+        var dedupByKey: [String: IndexedApp] = [:]
+        for app in items {
+            let key = appDeduplicationKey(for: app)
+            if dedupByKey[key] == nil {
+                dedupByKey[key] = app
+            }
+        }
+
+        return dedupByKey.values.sorted { lhs, rhs in
+            if lhs.name == rhs.name {
+                return lhs.url.path < rhs.url.path
+            }
+            return lhs.name < rhs.name
+        }
     }
+
+    private func appDeduplicationKey(for app: IndexedApp) -> String {
+        let url = app.url.standardizedFileURL
+        let bundleID = Bundle(url: url)?.bundleIdentifier ?? ""
+        return "\(bundleID)|\(app.name.lowercased())|\(url.path.lowercased())"
+    }
+
+    private static let knownSystemBundleIDs: [String] = [
+        "com.apple.AppStore",
+        "com.apple.systempreferences",
+        "com.apple.MobileSMS",
+        "com.apple.finder",
+        "com.apple.Safari",
+        "com.apple.mail"
+    ]
 
     private func appSuggestions() -> [SearchResultItem] {
         indexedApps.prefix(12).map { app in

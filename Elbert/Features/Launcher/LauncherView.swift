@@ -5,7 +5,6 @@
 
 import SwiftUI
 import AppKit
-import Carbon
 
 struct LauncherView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
@@ -69,7 +68,7 @@ struct LauncherView: View {
                 .foregroundStyle(.secondary)
             voiceStateBadge
             Spacer()
-            Text("Hold \(coordinator.voicePushToTalkModifier.hintGlyph) talk · ↑↓ navigate · ↩ open · ⌘R reveal · ⌘C copy path · ⎋ close")
+            Text("Hold \(coordinator.voicePushToTalkModifier.hintGlyph) talk · ↑↓ navigate · ↩ run · ⌘R reveal · ⌘C copy+close · ⇧⌘C copy path · ⎋ close")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
@@ -131,7 +130,15 @@ struct LauncherView: View {
 
     private var resultsPane: some View {
         Group {
-            if coordinator.state.results.isEmpty {
+            if coordinator.state.isClipboardMode {
+                ClipboardHistoryPane(
+                    results: coordinator.state.results,
+                    query: coordinator.state.query,
+                    isFuzzyModeEnabled: coordinator.isFuzzyModeEnabled,
+                    selectedID: coordinator.state.selectedResultID,
+                    onRun: { coordinator.run(result: $0) }
+                )
+            } else if coordinator.state.results.isEmpty {
                 emptyState
             } else if let item = calculatorItem {
                 CalculatorResultPane(
@@ -225,15 +232,26 @@ struct LauncherView: View {
             }
 
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if modifiers == .command {
-                if Int(event.keyCode) == kVK_ANSI_C {
-                    if let selected = selectedResult, case .openFile = selected.action {
-                        coordinator.copyPath(for: selected)
+            let significantModifiers = modifiers
+                .intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function, .capsLock])
+
+            if significantModifiers == .command {
+                if Int(event.keyCode) == KeyboardKeyCode.c {
+                    if let selected = selectedResult {
+                        coordinator.copySelectedValueAndClose(for: selected)
                         return nil
                     }
-                } else if Int(event.keyCode) == kVK_ANSI_R {
+                } else if Int(event.keyCode) == KeyboardKeyCode.r {
                     if let selected = selectedResult, case .openFile = selected.action {
                         coordinator.revealFileInFinder(for: selected)
+                        return nil
+                    }
+                }
+            } else if significantModifiers == [.command, .shift] {
+                if Int(event.keyCode) == KeyboardKeyCode.c {
+                    if let selected = selectedResult, case .openFile = selected.action {
+                        coordinator.copyPath(for: selected)
                         return nil
                     }
                 }
@@ -243,14 +261,14 @@ struct LauncherView: View {
             // before checking whether any significant modifier is held.
             let significant = modifiers
                 .intersection(.deviceIndependentFlagsMask)
-                .subtracting([.numericPad, .function])
+                .subtracting([.numericPad, .function, .capsLock])
             guard significant.isEmpty else { return event }
 
             switch Int(event.keyCode) {
-            case kVK_UpArrow:
+            case KeyboardKeyCode.upArrow:
                 moveSelection(by: -1)
                 return nil
-            case kVK_DownArrow:
+            case KeyboardKeyCode.downArrow:
                 moveSelection(by: 1)
                 return nil
             default:
@@ -463,6 +481,54 @@ private struct CalculatorResultPane: View {
 }
 
 // MARK: - Results List
+
+private struct ClipboardHistoryPane: View {
+    let results: [SearchResultItem]
+    let query: String
+    let isFuzzyModeEnabled: Bool
+    let selectedID: SearchResultItem.ID?
+    let onRun: (SearchResultItem) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Clipboard History")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Enter pastes into previous app")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+
+            if results.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "clipboard")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.tertiary)
+                    Text("No clipboard items yet")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.bottom, 20)
+            } else {
+                ResultsList(
+                    results: results,
+                    query: query,
+                    isFuzzyModeEnabled: isFuzzyModeEnabled,
+                    selectedID: selectedID,
+                    onRun: onRun,
+                    onRevealInFinder: { _ in },
+                    onCopyPath: { _ in }
+                )
+            }
+        }
+    }
+}
 
 private struct ResultsList: View {
     let results: [SearchResultItem]
@@ -687,6 +753,8 @@ private struct ResultIconView: View {
             iconShell(systemName: "terminal")
         case .copyToClipboard:
             iconShell(systemName: "function")
+        case .pasteClipboardEntry:
+            iconShell(systemName: "clipboard")
         }
     }
 

@@ -16,8 +16,12 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 ## Current Features
 
 - **Global shortcut launcher**: Open Elbert from anywhere (default: `Cmd + Shift + Space`).
-- **Application indexing**: Indexes apps from `/Applications` and `~/Applications`.
+- **Non-Carbon global shortcut backend**: Event-tap based shortcut capture for reliable use across apps (requires Accessibility permission).
+- **Application indexing**: Indexes apps from `/Applications`, `/Applications/Utilities`, `/System/Applications`, `/System/Applications/Utilities`, and `~/Applications`.
 - **File indexing**: Index selected folders and search files by name, extension, and path tokens.
+- **Clipboard history command mode**: Type `clipboard`, `clip`, or `cliboard` to open a dedicated clipboard history list.
+- **Clipboard paste handoff**: Press `Enter` on a clipboard item to copy, paste into your previous app (`Cmd+V`), and close Elbert.
+- **Launcher copy shortcuts**: `Cmd+C` copies selected value and closes Elbert, `Cmd+Shift+C` keeps copy-path for file results.
 - **Configurable search matching**: Toggle fuzzy mode in Settings (fuzzy with typo tolerance or strict matching only).
 - **Result match highlighting**: Query-matched title segments are highlighted when fuzzy mode is enabled.
 - **Local voice mode**: Push-to-talk voice query capture in launcher with real-time audio visualizer.
@@ -34,13 +38,12 @@ Elbert is a fast macOS launcher built with SwiftUI. It helps you find and open a
 
 These are planned features for future releases:
 
-1. **Clipboard history with CloudKit sync**
-   - Local clipboard timeline.
-   - Optional CloudKit sync across your Apple devices.
-
-2. **Currency conversion**
+1. **Currency conversion**
    - Quick currency conversions from natural input.
    - Cached rates with background refresh.
+
+2. **Clipboard history sync (future extension)**
+   - Optional CloudKit sync across your Apple devices.
 
 ## Development
 
@@ -55,6 +58,12 @@ These are planned features for future releases:
 2. Open `Elbert.xcodeproj` in Xcode.
 3. Select the `Elbert` target/scheme.
 4. Build and run.
+
+### Permissions and distribution
+
+- Elbert is configured for direct distribution (not App Store sandboxed).
+- Global shortcut and automated paste require macOS Accessibility permission for Elbert.
+- Voice mode still requires microphone and speech recognition permissions.
 
 ### Architecture (high level)
 
